@@ -21,14 +21,20 @@
     .font-mono-tabular { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
     .tabular-nums { font-variant-numeric: tabular-nums; }
     @media print {
-      body * { visibility: hidden !important; }
-      #receipt-print-area, #receipt-print-area * { visibility: visible !important; }
-      #receipt-print-area {
+      .no-print { display: none !important; }
+      body[data-print-mode="receipt"] * { visibility: hidden !important; }
+      body[data-print-mode="receipt"] #receipt-print-area,
+      body[data-print-mode="receipt"] #receipt-print-area * { visibility: visible !important; }
+      body[data-print-mode="receipt"] #receipt-print-area {
         position: fixed !important; left: 0 !important; top: 0 !important;
         width: 58mm !important; padding: 4mm !important; margin: 0 !important;
         background: #fff !important; color: #000 !important; border: none !important;
       }
-      .no-print { display: none !important; }
+      body[data-print-mode="report"] { background: #fff !important; color: #0f172a !important; }
+      body[data-print-mode="report"] #report-print-area {
+        border: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important;
+      }
+      @page { margin: 14mm; }
     }
   </style>
 </head>
@@ -60,7 +66,7 @@
       <div id="bt-feedback" class="hidden mt-3 p-3 rounded-lg border text-xs"></div>
       <div class="mt-5 grid grid-cols-2 gap-3">
         <button onclick="printViaBluetooth()" class="px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold">Cetak Bluetooth</button>
-        <button onclick="window.print()" class="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold">Cetak Browser</button>
+        <button onclick="document.body.dataset.printMode='receipt';window.print()" class="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold">Cetak Browser</button>
       </div>
       <button onclick="closeReceiptModal()" class="mt-3 w-full py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium">Tutup</button>
     </div>
@@ -328,6 +334,44 @@
       t.is_active = t.is_active === false ? true : false;
       setDB(KEYS.SERVICES, srvs); render();
     }
+    function addNewUser(e) {
+      e.preventDefault();
+      const users = getDB(KEYS.USERS, []);
+      const full_name = (document.getElementById('new-usr-name').value || '').trim();
+      const username = (document.getElementById('new-usr-username').value || '').trim().toLowerCase();
+      const password_hash = (document.getElementById('new-usr-pass').value || '').trim();
+      const role = document.getElementById('new-usr-role').value;
+      if (!full_name || !username || !password_hash) { alert('Nama, username, dan kata sandi wajib diisi.'); return; }
+      if (users.some(u => u.username.toLowerCase() === username)) { alert('Username sudah digunakan.'); return; }
+      const nextId = users.reduce((m, u) => Math.max(m, u.id), 0) + 1;
+      users.push({ id: nextId, username, password_hash, role, full_name });
+      setDB(KEYS.USERS, users); render();
+    }
+    function saveEditUser(id) {
+      const users = getDB(KEYS.USERS, []);
+      const t = users.find(u => u.id === id); if (!t) return;
+      const full_name = (document.getElementById('edit-usr-name-' + id).value || '').trim();
+      const username = (document.getElementById('edit-usr-username-' + id).value || '').trim().toLowerCase();
+      const role = document.getElementById('edit-usr-role-' + id).value;
+      const pass = (document.getElementById('edit-usr-pass-' + id).value || '').trim();
+      if (!full_name || !username) { alert('Nama dan username wajib diisi.'); return; }
+      if (users.some(u => u.id !== id && u.username.toLowerCase() === username)) { alert('Username sudah digunakan.'); return; }
+      if (t.role === 'admin' && role !== 'admin' && users.filter(u => u.role === 'admin').length <= 1) { alert('Minimal 1 akun Administrator harus tetap tersedia.'); return; }
+      t.full_name = full_name; t.username = username; t.role = role;
+      if (pass) t.password_hash = pass;
+      const sess = getDB(KEYS.SESSION, null);
+      if (sess && sess.id === id) setDB(KEYS.SESSION, t);
+      window._editingUserId = null;
+      setDB(KEYS.USERS, users); render();
+    }
+    function deleteUserAccount(id) {
+      const sess = getDB(KEYS.SESSION, null);
+      if (sess && sess.id === id) { alert('Tidak dapat menghapus akun yang sedang login.'); return; }
+      const users = getDB(KEYS.USERS, []);
+      const t = users.find(u => u.id === id); if (!t) return;
+      if (t.role === 'admin' && users.filter(u => u.role === 'admin').length <= 1) { alert('Minimal 1 akun Administrator harus tetap tersedia.'); return; }
+      setDB(KEYS.USERS, users.filter(u => u.id !== id)); render();
+    }
     function simNextDay() { const s = getDB(KEYS.SETTINGS, {}); s.active_date = addDays(s.active_date, 1); setDB(KEYS.SETTINGS, s); render(); }
 
     function render() {
@@ -382,6 +426,10 @@
             }).join('')}
           </div></div></div>`;
       } else if (currentModule === 'internal' && !user) {
+        const allUsers = getDB(KEYS.USERS, []);
+        const qp = allUsers.find(u => u.role === 'petugas');
+        const qa = allUsers.find(u => u.role === 'admin');
+        const qm = allUsers.find(u => u.role === 'pimpinan');
         root.innerHTML = `<div class="max-w-3xl mx-auto px-4 py-10"><div class="bg-white border border-slate-200 rounded-2xl p-8 grid md:grid-cols-2 gap-8">
           <form onsubmit="doLogin(event)" class="space-y-4">
             <h2 class="font-display text-xl font-bold">Login Portal Internal</h2>
@@ -391,9 +439,9 @@
           </form>
           <div class="space-y-3">
             <h3 class="font-display font-bold text-sm">Quick Login Prototipe</h3>
-            <button onclick="quickLogin('petugas')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">Petugas (petugas / 12345)</button>
-            <button onclick="quickLogin('admin')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">Admin (admin / 12345)</button>
-            <button onclick="quickLogin('pimpinan')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">Pimpinan (pimpinan / 12345)</button>
+            <button onclick="quickLogin('petugas')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">${qp?.full_name||'Petugas'} (${qp?.username||'petugas'})</button>
+            <button onclick="quickLogin('admin')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">${qa?.full_name||'Admin'} (${qa?.username||'admin'})</button>
+            <button onclick="quickLogin('pimpinan')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">${qm?.full_name||'Pimpinan'} (${qm?.username||'pimpinan'})</button>
           </div></div></div>`;
       } else if (user.role === 'petugas') {
         const activeCs = cs.filter(c => c.is_active);
@@ -426,16 +474,32 @@
             </div>
           </div></div>`;
       } else {
+        const allUsers = getDB(KEYS.USERS, []);
+        const pimpinanUsers = allUsers.filter(u => u.role === 'pimpinan');
+        if (!window._selectedPimpinanId || !pimpinanUsers.some(p => p.id === window._selectedPimpinanId)) {
+          window._selectedPimpinanId = (user.role === 'pimpinan' ? user.id : pimpinanUsers[0]?.id) || null;
+        }
+        const activePimpinan = pimpinanUsers.find(p => p.id === window._selectedPimpinanId) || pimpinanUsers[0] || null;
+        const pimpinanDisplayName = activePimpinan?.full_name || 'Camat Tulangan';
         const start = window._repStart || addDays(todayISO(), -13);
         const end = window._repEnd || (s.active_date > todayISO() ? s.active_date : todayISO());
         const filtered = qs.filter(q => q.queue_date >= start && q.queue_date <= end);
-        const rows = srvs.map(sv => ({ name: sv.service_name, count: filtered.filter(q => q.service_id === sv.id).length }));
+        const rows = srvs.map(sv => {
+          const items = filtered.filter(q => q.service_id === sv.id);
+          const completed = items.filter(q => q.status === 'completed').length;
+          const active = items.filter(q => q.status === 'waiting' || q.status === 'called').length;
+          const pct = filtered.length > 0 ? ((items.length / filtered.length) * 100).toFixed(1) : '0.0';
+          return { name: sv.service_name, count: items.length, completed, active, pct };
+        });
+        const totalCompleted = filtered.filter(q => q.status === 'completed').length;
+        const totalActive = filtered.filter(q => q.status === 'waiting' || q.status === 'called').length;
+        document.body.dataset.printMode = (user.role !== 'admin' || adminTab === 'report') ? 'report' : '';
         root.innerHTML = `<div class="max-w-6xl mx-auto px-4 py-8 space-y-6">
-          <div class="bg-white border rounded-2xl p-6 flex flex-wrap justify-between items-center gap-4">
+          <div class="no-print bg-white border rounded-2xl p-6 flex flex-wrap justify-between items-center gap-4">
             <div><h2 class="font-display text-xl font-bold">${user.full_name}</h2><p class="text-xs text-slate-500">Tanggal Aktif: ${s.active_date}</p></div>
             <div class="flex flex-wrap gap-2">
-              ${user.role==='admin'?`<button onclick="adminTab='branding';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='branding'?'bg-slate-900 text-white':'bg-slate-100'}">Edit Tampilan</button><button onclick="adminTab='counters';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='counters'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Loket</button><button onclick="adminTab='services';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='services'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Layanan</button>`:''}
-              <button onclick="adminTab='report';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='report'?'bg-slate-900 text-white':'bg-slate-100'}">Rekapitulasi</button>
+              ${user.role==='admin'?`<button onclick="adminTab='branding';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='branding'?'bg-slate-900 text-white':'bg-slate-100'}">Edit Tampilan</button><button onclick="adminTab='counters';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='counters'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Loket</button><button onclick="adminTab='services';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='services'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Layanan</button><button onclick="adminTab='users';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='users'?'bg-slate-900 text-white':'bg-slate-100'}">Atur User</button>`:''}
+              <button onclick="adminTab='report';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='report'?'bg-slate-900 text-white':'bg-slate-100'}">Laporan Rekapitulasi</button>
             </div>
           </div>
           ${user.role==='admin' && adminTab==='branding' ? `
@@ -500,16 +564,90 @@
                   </div>`).join('')}
               </div>
             </div>
-          ` : `
-            <div class="bg-white border rounded-2xl p-6 space-y-6">
-              <div class="flex flex-wrap gap-4 items-end">
-                <div><label class="block text-xs font-semibold mb-1">Tanggal Mulai</label><input type="date" value="${start}" onchange="window._repStart=this.value;render()" class="px-3 py-2 border rounded-lg text-sm" /></div>
-                <div><label class="block text-xs font-semibold mb-1">Tanggal Akhir</label><input type="date" value="${end}" onchange="window._repEnd=this.value;render()" class="px-3 py-2 border rounded-lg text-sm" /></div>
+          ` : user.role==='admin' && adminTab==='users' ? `
+            <div class="grid md:grid-cols-12 gap-6">
+              <form onsubmit="addNewUser(event)" class="md:col-span-4 bg-white border rounded-2xl p-6 space-y-4">
+                <h3 class="font-display font-bold">Tambah Pengguna Baru</h3>
+                <input id="new-usr-name" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Nama Lengkap / Nama Pimpinan" required />
+                <input id="new-usr-username" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Username Login" required />
+                <input id="new-usr-pass" value="12345" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Kata Sandi" required />
+                <select id="new-usr-role" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                  <option value="petugas">Petugas Loket</option>
+                  <option value="admin">Administrator</option>
+                  <option value="pimpinan">Pimpinan (Tampil di Laporan)</option>
+                </select>
+                <button class="w-full py-2.5 rounded-lg bg-emerald-700 text-white text-sm font-semibold">+ Tambah User</button>
+              </form>
+              <div class="md:col-span-8 bg-white border rounded-2xl p-6 divide-y">
+                ${allUsers.map(u => window._editingUserId === u.id ? `
+                  <div class="py-3 space-y-2">
+                    <div class="grid sm:grid-cols-2 gap-2">
+                      <input id="edit-usr-name-${u.id}" value="${u.full_name}" class="w-full px-3 py-2 border rounded-lg text-sm font-semibold" placeholder="Nama Lengkap / Pimpinan" />
+                      <input id="edit-usr-username-${u.id}" value="${u.username}" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Username" />
+                      <select id="edit-usr-role-${u.id}" class="w-full px-3 py-2 border rounded-lg text-sm bg-white">
+                        <option value="petugas" ${u.role==='petugas'?'selected':''}>Petugas</option>
+                        <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+                        <option value="pimpinan" ${u.role==='pimpinan'?'selected':''}>Pimpinan</option>
+                      </select>
+                      <input id="edit-usr-pass-${u.id}" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Kata sandi baru (opsional)" />
+                    </div>
+                    <div class="flex gap-2 justify-end">
+                      <button type="button" onclick="window._editingUserId=null;render()" class="px-3 py-1.5 rounded-lg border text-xs">Batal</button>
+                      <button type="button" onclick="saveEditUser(${u.id})" class="px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold">Simpan</button>
+                    </div>
+                  </div>` : `
+                  <div class="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div class="font-bold text-sm">${u.full_name} <span class="text-xs font-semibold ${u.role==='pimpinan'?'text-amber-700':u.role==='admin'?'text-emerald-700':'text-slate-500'}">· ${u.role}</span></div>
+                      <div class="text-xs text-slate-500 font-mono-tabular">Username: ${u.username}${u.role==='pimpinan'?' · Tampil di Laporan':''}</div>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                      <button onclick="window._editingUserId=${u.id};render()" class="px-3 py-1.5 rounded-lg border text-xs font-semibold">Edit</button>
+                      <button onclick="deleteUserAccount(${u.id})" ${u.id===user.id?'disabled':''} class="px-3 py-1.5 rounded-lg border border-red-200 text-red-700 text-xs font-semibold disabled:opacity-40">Hapus</button>
+                    </div>
+                  </div>`).join('')}
               </div>
-              <div class="grid md:grid-cols-2 gap-6 items-center">
-                <table class="w-full text-sm"><thead><tr class="border-b text-xs text-slate-500"><th class="py-2 text-left">Layanan</th><th class="text-right">Jumlah</th></tr></thead>
-                <tbody>${rows.map(r => `<tr class="border-b"><td class="py-2.5 font-medium">${r.name}</td><td class="text-right font-mono-tabular font-bold">${r.count}</td></tr>`).join('')}</tbody></table>
-                <div class="h-64 relative"><canvas id="rep-chart"></canvas></div>
+            </div>
+          ` : `
+            <div class="space-y-6">
+              <div class="no-print bg-white border rounded-2xl p-5 flex flex-wrap gap-4 items-end justify-between">
+                <div class="flex flex-wrap gap-4 items-end">
+                  <div><label class="block text-xs font-semibold mb-1">Tanggal Mulai</label><input type="date" value="${start}" onchange="window._repStart=this.value;render()" class="px-3 py-2 border rounded-lg text-sm font-mono-tabular" /></div>
+                  <div><label class="block text-xs font-semibold mb-1">Tanggal Akhir</label><input type="date" value="${end}" onchange="window._repEnd=this.value;render()" class="px-3 py-2 border rounded-lg text-sm font-mono-tabular" /></div>
+                  <div><label class="block text-xs font-semibold mb-1">Nama Pimpinan (Laporan)</label><select onchange="window._selectedPimpinanId=+this.value;render()" class="px-3 py-2 border rounded-lg text-sm bg-white">${pimpinanUsers.length ? pimpinanUsers.map(p => `<option value="${p.id}" ${p.id===activePimpinan?.id?'selected':''}>${p.full_name}</option>`).join('') : '<option>Camat Tulangan</option>'}</select></div>
+                </div>
+                <button onclick="document.body.dataset.printMode='report';window.print()" class="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold">Cetak PDF</button>
+              </div>
+              <div id="report-print-area" class="bg-white border rounded-2xl p-6 sm:p-8 space-y-6">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b-2 border-slate-900">
+                  <div class="flex items-center gap-3"><img src="${s.logo_url}" class="w-12 h-12 rounded-lg object-contain border p-0.5 bg-white" />
+                    <div><div class="font-display text-lg font-bold">${s.header_text}</div><div class="text-xs text-slate-600">${s.subheader_text}</div></div>
+                  </div>
+                  <div class="sm:text-right text-xs text-slate-700">
+                    <div class="font-display font-bold text-sm text-slate-900">Laporan Rekapitulasi Pelayanan</div>
+                    <div>Periode: <b class="font-mono-tabular">${start} s/d ${end}</b></div>
+                    <div>Pimpinan: <b>${pimpinanDisplayName}</b></div>
+                  </div>
+                </div>
+                <div class="grid md:grid-cols-12 gap-6 items-start">
+                  <div class="md:col-span-7 print:col-span-12">
+                    <h4 class="font-display font-bold text-sm mb-2">Data Jumlah Pemohon per Layanan (${start} s/d ${end})</h4>
+                    <table class="w-full text-sm">
+                      <thead><tr class="border-b text-xs text-slate-500"><th class="py-2 text-left">Jenis Layanan</th><th class="text-right">Pemohon</th><th class="text-right">Selesai</th><th class="text-right">Aktif</th><th class="text-right">%</th></tr></thead>
+                      <tbody>${rows.map(r => `<tr class="border-b"><td class="py-2.5 font-medium">${r.name}</td><td class="text-right font-mono-tabular font-bold">${r.count}</td><td class="text-right font-mono-tabular text-emerald-700">${r.completed}</td><td class="text-right font-mono-tabular">${r.active}</td><td class="text-right font-mono-tabular">${r.pct}%</td></tr>`).join('')}</tbody>
+                      <tfoot><tr class="border-t-2 border-slate-900 font-bold"><td class="py-2.5">Total Keseluruhan</td><td class="text-right font-mono-tabular">${filtered.length}</td><td class="text-right font-mono-tabular text-emerald-700">${totalCompleted}</td><td class="text-right font-mono-tabular">${totalActive}</td><td class="text-right font-mono-tabular">${filtered.length>0?'100.0':'0.0'}%</td></tr></tfoot>
+                    </table>
+                  </div>
+                  <div class="md:col-span-5 no-print h-64 relative"><canvas id="rep-chart"></canvas></div>
+                </div>
+                <div class="pt-6 border-t flex justify-end">
+                  <div class="text-center min-w-[220px]">
+                    <div class="text-xs text-slate-600">Tulangan, ${todayISO()}</div>
+                    <div class="text-xs font-semibold text-slate-800 mt-1">Mengetahui, Pimpinan</div>
+                    <div class="h-12"></div>
+                    <div class="font-display text-sm font-bold underline underline-offset-4">${pimpinanDisplayName}</div>
+                  </div>
+                </div>
               </div>
             </div>
           `}</div>`;

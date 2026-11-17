@@ -681,4 +681,120 @@ export function deleteService(serviceId: number): { success: boolean; message: s
   return { success: true, message: `Layanan "${target.service_name}" berhasil dihapus.` };
 }
 
+export function addUser(payload: {
+  username: string;
+  password_hash: string;
+  role: User['role'];
+  full_name: string;
+}): { success: boolean; message: string; user?: User } {
+  const users = getUsers();
+  const cleanUsername = payload.username.trim().toLowerCase();
+  const cleanName = payload.full_name.trim();
+
+  if (!cleanUsername || !cleanName || !payload.password_hash.trim()) {
+    return { success: false, message: 'Nama lengkap, username, dan kata sandi wajib diisi.' };
+  }
+
+  if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
+    return { success: false, message: `Username "${cleanUsername}" sudah digunakan.` };
+  }
+
+  const nextId = users.reduce((max, u) => Math.max(max, u.id), 0) + 1;
+  const newUser: User = {
+    id: nextId,
+    username: cleanUsername,
+    password_hash: payload.password_hash,
+    role: payload.role,
+    full_name: cleanName,
+  };
+
+  writeJSON(STORAGE_KEYS.USERS, [...users, newUser]);
+  broadcastSync('users-updated');
+  return { success: true, message: `Pengguna "${cleanName}" berhasil ditambahkan.`, user: newUser };
+}
+
+export function updateUser(
+  userId: number,
+  payload: {
+    username: string;
+    password_hash?: string;
+    role: User['role'];
+    full_name: string;
+  }
+): { success: boolean; message: string } {
+  const users = getUsers();
+  const target = users.find((u) => u.id === userId);
+  if (!target) {
+    return { success: false, message: 'Pengguna tidak ditemukan.' };
+  }
+
+  const cleanUsername = payload.username.trim().toLowerCase();
+  const cleanName = payload.full_name.trim();
+  if (!cleanUsername || !cleanName) {
+    return { success: false, message: 'Nama lengkap dan username wajib diisi.' };
+  }
+
+  if (users.some((u) => u.id !== userId && u.username.toLowerCase() === cleanUsername)) {
+    return { success: false, message: `Username "${cleanUsername}" sudah digunakan akun lain.` };
+  }
+
+  if (target.role === 'admin' && payload.role !== 'admin') {
+    const adminCount = users.filter((u) => u.role === 'admin').length;
+    if (adminCount <= 1) {
+      return { success: false, message: 'Minimal harus ada 1 akun dengan peran Admin.' };
+    }
+  }
+
+  const updatedUser: User = {
+    ...target,
+    username: cleanUsername,
+    role: payload.role,
+    full_name: cleanName,
+    password_hash:
+      payload.password_hash && payload.password_hash.trim()
+        ? payload.password_hash
+        : target.password_hash,
+  };
+
+  const updated = users.map((u) => (u.id === userId ? updatedUser : u));
+  writeJSON(STORAGE_KEYS.USERS, updated);
+
+  // Sync active session user if editing currently logged-in user
+  const session = getSessionUser();
+  if (session && session.id === userId) {
+    writeJSON(STORAGE_KEYS.SESSION_USER, updatedUser);
+  }
+
+  broadcastSync('users-updated');
+  return { success: true, message: `Data pengguna "${cleanName}" berhasil diperbarui.` };
+}
+
+export function deleteUser(
+  userId: number,
+  currentSessionUserId?: number
+): { success: boolean; message: string } {
+  const users = getUsers();
+  const target = users.find((u) => u.id === userId);
+  if (!target) {
+    return { success: false, message: 'Pengguna tidak ditemukan.' };
+  }
+
+  if (currentSessionUserId && target.id === currentSessionUserId) {
+    return { success: false, message: 'Akun yang sedang aktif login tidak dapat dihapus.' };
+  }
+
+  if (target.role === 'admin') {
+    const adminCount = users.filter((u) => u.role === 'admin').length;
+    if (adminCount <= 1) {
+      return { success: false, message: 'Minimal harus ada 1 akun Admin pada sistem.' };
+    }
+  }
+
+  const updated = users.filter((u) => u.id !== userId);
+  writeJSON(STORAGE_KEYS.USERS, updated);
+  broadcastSync('users-updated');
+  return { success: true, message: `Pengguna "${target.full_name}" berhasil dihapus.` };
+}
+
+
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Bluetooth,
   CheckCircle2,
@@ -31,6 +31,13 @@ export const KioskView: React.FC<KioskViewProps> = ({ settings, services, queues
     msg: '',
   });
 
+  useEffect(() => {
+    document.body.dataset.printMode = issuedTicket ? 'receipt' : '';
+    return () => {
+      document.body.dataset.printMode = '';
+    };
+  }, [issuedTicket]);
+
   const activeServices = services.filter((s) => s.is_active);
   const nextNumberPreview = generateNextQueueNumber(queues, settings.active_date);
   const waitingTodayCount = queues.filter(
@@ -55,6 +62,7 @@ export const KioskView: React.FC<KioskViewProps> = ({ settings, services, queues
   };
 
   const handleBrowserPrint = () => {
+    document.body.dataset.printMode = 'receipt';
     window.print();
   };
 

@@ -266,6 +266,7 @@ export default function App() {
               counters={counters}
               services={services}
               queues={queues}
+              users={users}
             />
           )}
 

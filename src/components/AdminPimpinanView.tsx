@@ -26,15 +26,19 @@ import {
   Check,
   X,
   Layers,
+  UserCog,
 } from 'lucide-react';
-import { Counter, QueueItem, Service, Settings, User } from '../types/sitara';
+import { Counter, QueueItem, Service, Settings, User, UserRole } from '../types/sitara';
 import { DEFAULT_LOGO_DATA_URI } from '../data/sqlSchema';
 import {
   addCounter,
   addDaysISO,
   addService,
+  addUser,
   deleteCounter,
   deleteService,
+  deleteUser,
+  formatIndonesianDate,
   getTodayISO,
   initializeDatabase,
   renameCounter,
@@ -44,6 +48,7 @@ import {
   toggleCounterActive,
   toggleServiceActive,
   updateService,
+  updateUser,
 } from '../utils/storage';
 import { BrandLogo, ServiceIcon } from './DynamicBrandHeader';
 
@@ -55,6 +60,7 @@ interface AdminPimpinanViewProps {
   counters: Counter[];
   services: Service[];
   queues: QueueItem[];
+  users: User[];
 }
 
 const CHART_COLORS = ['#059669', '#0f172a', '#d97706', '#2563eb', '#64748b'];
@@ -76,9 +82,10 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
   counters,
   services,
   queues,
+  users,
 }) => {
   const isAdmin = user.role === 'admin';
-  const [activeTab, setActiveTab] = useState<'branding' | 'counters' | 'services' | 'report'>(
+  const [activeTab, setActiveTab] = useState<'branding' | 'counters' | 'services' | 'users' | 'report'>(
     isAdmin ? 'branding' : 'report'
   );
 
@@ -102,6 +109,33 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
   const [editServiceDesc, setEditServiceDesc] = useState<string>('');
   const [editServiceIcon, setEditServiceIcon] = useState<Service['icon']>('file-text');
 
+  // Atur User state
+  const [newUserFullName, setNewUserFullName] = useState<string>('');
+  const [newUserUsername, setNewUserUsername] = useState<string>('');
+  const [newUserPassword, setNewUserPassword] = useState<string>('12345');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('petugas');
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editUserFullName, setEditUserFullName] = useState<string>('');
+  const [editUserUsername, setEditUserUsername] = useState<string>('');
+  const [editUserPassword, setEditUserPassword] = useState<string>('');
+  const [editUserRole, setEditUserRole] = useState<UserRole>('petugas');
+
+  // Pimpinan selection for Report
+  const pimpinanUsers = useMemo(() => users.filter((u) => u.role === 'pimpinan'), [users]);
+  const [selectedPimpinanId, setSelectedPimpinanId] = useState<number | null>(
+    () => (user.role === 'pimpinan' ? user.id : pimpinanUsers[0]?.id ?? null)
+  );
+
+  useEffect(() => {
+    if (pimpinanUsers.length > 0 && !pimpinanUsers.some((p) => p.id === selectedPimpinanId)) {
+      setSelectedPimpinanId(pimpinanUsers[0].id);
+    }
+  }, [pimpinanUsers, selectedPimpinanId]);
+
+  const activePimpinan =
+    pimpinanUsers.find((p) => p.id === selectedPimpinanId) || pimpinanUsers[0] || null;
+  const pimpinanDisplayName = activePimpinan?.full_name || 'Camat Tulangan';
+
   // Sync draft when external reset happens
   useEffect(() => {
     setDraftLogo(settings.logo_url);
@@ -120,6 +154,13 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
       setEndDate(settings.active_date);
     }
   }, [settings.active_date, endDate]);
+
+  useEffect(() => {
+    document.body.dataset.printMode = activeTab === 'report' ? 'report' : '';
+    return () => {
+      document.body.dataset.printMode = '';
+    };
+  }, [activeTab]);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -230,6 +271,50 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
 
   const handleDeleteService = (serviceId: number) => {
     const res = deleteService(serviceId);
+    showNotice(res.success ? 'ok' : 'err', res.message);
+  };
+
+  const handleAddUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = addUser({
+      full_name: newUserFullName,
+      username: newUserUsername,
+      password_hash: newUserPassword,
+      role: newUserRole,
+    });
+    showNotice(res.success ? 'ok' : 'err', res.message);
+    if (res.success) {
+      setNewUserFullName('');
+      setNewUserUsername('');
+      setNewUserPassword('12345');
+      setNewUserRole('petugas');
+    }
+  };
+
+  const handleStartEditUser = (target: User) => {
+    setEditingUserId(target.id);
+    setEditUserFullName(target.full_name);
+    setEditUserUsername(target.username);
+    setEditUserPassword('');
+    setEditUserRole(target.role);
+  };
+
+  const handleSaveEditUser = (userId: number) => {
+    const res = updateUser(userId, {
+      full_name: editUserFullName,
+      username: editUserUsername,
+      password_hash: editUserPassword,
+      role: editUserRole,
+    });
+    showNotice(res.success ? 'ok' : 'err', res.message);
+    if (res.success) {
+      setEditingUserId(null);
+      setEditUserPassword('');
+    }
+  };
+
+  const handleDeleteUser = (userId: number) => {
+    const res = deleteUser(userId, user.id);
     showNotice(res.success ? 'ok' : 'err', res.message);
   };
 
@@ -356,6 +441,12 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
   }, [activeTab, serviceSummary, filteredQueues.length]);
 
   const handleDownloadCSV = () => {
+    const meta = [
+      [`"Laporan Rekapitulasi Pelayanan"`, `"${settings.header_text}"`],
+      [`"Periode"`, `"${startDate} s/d ${endDate}"`],
+      [`"Pimpinan"`, `"${pimpinanDisplayName}"`],
+      [],
+    ];
     const header = ['Jenis Layanan', 'Total Pemohon', 'Selesai', 'Menunggu/Diproses', 'Dilewati', 'Persentase (%)'];
     const rows = serviceSummary.map((r) => [
       `"${r.service.service_name}"`,
@@ -365,7 +456,15 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
       r.skipped,
       r.percentage,
     ]);
-    const csvContent = [header.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const totalRow = [
+      '"Total Keseluruhan"',
+      filteredQueues.length,
+      totalCompleted,
+      totalActive,
+      filteredQueues.filter((q) => q.status === 'skipped').length,
+      filteredQueues.length > 0 ? '100.0' : '0.0',
+    ];
+    const csvContent = [...meta, header, ...rows, totalRow].map((r) => r.join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -375,10 +474,15 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handlePrintReportPDF = () => {
+    document.body.dataset.printMode = 'report';
+    window.print();
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       {/* Header & Role Segmented Switch */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="no-print bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="font-display text-xl sm:text-2xl font-bold text-slate-900">
             {isAdmin ? 'Dashboard Administrator SITARA' : 'Dashboard Pimpinan Kecamatan'}
@@ -430,6 +534,18 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
                 <Layers className="w-3.5 h-3.5" />
                 <span>Atur Layanan</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                  activeTab === 'users'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UserCog className="w-3.5 h-3.5" />
+                <span>Atur User</span>
+              </button>
             </>
           )}
           <button
@@ -449,7 +565,7 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
 
       {notice && (
         <div
-          className={`px-4 py-3 rounded-xl border text-sm flex items-center gap-2.5 ${
+          className={`no-print px-4 py-3 rounded-xl border text-sm flex items-center gap-2.5 ${
             notice.type === 'ok'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
               : 'bg-amber-50 border-amber-200 text-amber-900'
@@ -1057,14 +1173,281 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
         </div>
       )}
 
-      {/* TAB 4: LAPORAN REKAPITULASI (ADMIN & PIMPINAN) */}
+      {/* TAB 4: MENU ATUR USER (TAMBAH, EDIT, HAPUS USER & NAMA PIMPINAN) */}
+      {isAdmin && activeTab === 'users' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Form Tambah User Baru */}
+          <form
+            onSubmit={handleAddUser}
+            className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-6 space-y-4"
+          >
+            <div className="border-b border-slate-100 pb-4">
+              <h3 className="font-display text-lg font-bold text-slate-900">
+                Tambah Pengguna Baru
+              </h3>
+              <p className="text-xs text-slate-600 mt-1">
+                Tambahkan akun Petugas, Admin, atau Pimpinan. Nama user Pimpinan otomatis muncul
+                pada Laporan Rekapitulasi & Cetak PDF.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-user-fullname"
+                className="block text-sm font-semibold text-slate-800 mb-1.5"
+              >
+                Nama Lengkap / Nama Pimpinan
+              </label>
+              <input
+                id="new-user-fullname"
+                type="text"
+                value={newUserFullName}
+                onChange={(e) => setNewUserFullName(e.target.value)}
+                placeholder="Misal: Drs. H. Ahmad Fauzi, M.Si."
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                required
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-user-username"
+                className="block text-sm font-semibold text-slate-800 mb-1.5"
+              >
+                Username Login
+              </label>
+              <input
+                id="new-user-username"
+                type="text"
+                value={newUserUsername}
+                onChange={(e) => setNewUserUsername(e.target.value)}
+                placeholder="Misal: camat_tulangan"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                required
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-user-password"
+                className="block text-sm font-semibold text-slate-800 mb-1.5"
+              >
+                Kata Sandi
+              </label>
+              <input
+                id="new-user-password"
+                type="text"
+                value={newUserPassword}
+                onChange={(e) => setNewUserPassword(e.target.value)}
+                placeholder="Minimal 4 karakter"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                required
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-user-role"
+                className="block text-sm font-semibold text-slate-800 mb-1.5"
+              >
+                Peran (Role)
+              </label>
+              <select
+                id="new-user-role"
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              >
+                <option value="petugas">Petugas Loket</option>
+                <option value="admin">Administrator</option>
+                <option value="pimpinan">Pimpinan (Tampil di Laporan)</option>
+              </select>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah User</span>
+            </button>
+
+            <div className="pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center justify-between">
+              <span>Total Pengguna Terdaftar</span>
+              <span className="font-mono-tabular font-bold text-slate-900">{users.length}</span>
+            </div>
+          </form>
+
+          {/* Daftar User (Edit & Hapus) */}
+          <div className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="font-display text-lg font-bold text-slate-900">
+                  Daftar Pengguna Sistem
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Edit nama pimpinan untuk memperbarui nama penanggung jawab di menu Laporan
+                  Rekapitulasi dan cetakan PDF.
+                </p>
+              </div>
+              <span className="text-xs font-medium text-slate-500 tabular-nums">
+                {users.length} akun
+              </span>
+            </div>
+
+            <div className="mt-4 divide-y divide-slate-100">
+              {users.map((u) => {
+                const isEditing = editingUserId === u.id;
+                const roleLabel =
+                  u.role === 'admin'
+                    ? 'Administrator'
+                    : u.role === 'pimpinan'
+                    ? 'Pimpinan'
+                    : 'Petugas';
+
+                return (
+                  <div key={u.id} className="py-4">
+                    {isEditing ? (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              Nama Lengkap / Nama Pimpinan
+                            </label>
+                            <input
+                              type="text"
+                              value={editUserFullName}
+                              onChange={(e) => setEditUserFullName(e.target.value)}
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              Username
+                            </label>
+                            <input
+                              type="text"
+                              value={editUserUsername}
+                              onChange={(e) => setEditUserUsername(e.target.value)}
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              Peran (Role)
+                            </label>
+                            <select
+                              value={editUserRole}
+                              onChange={(e) => setEditUserRole(e.target.value as UserRole)}
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                            >
+                              <option value="petugas">Petugas</option>
+                              <option value="admin">Admin</option>
+                              <option value="pimpinan">Pimpinan</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              Kata Sandi Baru (Opsional)
+                            </label>
+                            <input
+                              type="text"
+                              value={editUserPassword}
+                              onChange={(e) => setEditUserPassword(e.target.value)}
+                              placeholder="Kosongkan jika tidak diubah"
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingUserId(null)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Batal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEditUser(u.id)}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Simpan User</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-display font-bold text-base text-slate-900">
+                              {u.full_name}
+                            </span>
+                            <span
+                              className={`text-xs font-semibold ${
+                                u.role === 'pimpinan'
+                                  ? 'text-amber-700'
+                                  : u.role === 'admin'
+                                  ? 'text-emerald-700'
+                                  : 'text-slate-600'
+                              }`}
+                            >
+                              · {roleLabel}
+                            </span>
+                            {u.id === user.id && (
+                              <span className="text-xs text-slate-500">· Sedang Login</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5 font-mono-tabular">
+                            Username: {u.username}
+                            {u.role === 'pimpinan' && ' · Ditampilkan pada Laporan Rekapitulasi'}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditUser(u)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-800 transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(u.id)}
+                            disabled={u.id === user.id}
+                            className="inline-flex items-center justify-center p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-red-700 hover:border-red-200 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                            aria-label={`Hapus pengguna ${u.full_name}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: LAPORAN REKAPITULASI (ADMIN & PIMPINAN) */}
       {activeTab === 'report' && (
         <div className="space-y-6">
           {/* Filter Bar */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1 max-w-xl">
+          <div className="no-print bg-white border border-slate-200 rounded-2xl p-5 flex flex-col xl:flex-row xl:items-end justify-between gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
               <div>
-                <label htmlFor="filter-start-date" className="block text-xs font-semibold text-slate-700 mb-1">
+                <label
+                  htmlFor="filter-start-date"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
                   Tanggal Mulai
                 </label>
                 <input
@@ -1076,7 +1459,10 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
                 />
               </div>
               <div>
-                <label htmlFor="filter-end-date" className="block text-xs font-semibold text-slate-700 mb-1">
+                <label
+                  htmlFor="filter-end-date"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
                   Tanggal Akhir
                 </label>
                 <input
@@ -1087,9 +1473,33 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-mono-tabular text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 />
               </div>
+              <div>
+                <label
+                  htmlFor="filter-pimpinan"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Nama Pimpinan (Laporan)
+                </label>
+                <select
+                  id="filter-pimpinan"
+                  value={activePimpinan?.id ?? ''}
+                  onChange={(e) => setSelectedPimpinanId(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                >
+                  {pimpinanUsers.length > 0 ? (
+                    pimpinanUsers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.full_name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">Camat Tulangan</option>
+                  )}
+                </select>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1130,113 +1540,170 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={handlePrintReportPDF}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>Cetak</span>
+                <span>Cetak PDF</span>
               </button>
             </div>
           </div>
 
-          {/* 4-Column KPI Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <div className="text-xs font-medium text-slate-500">Total Pemohon</div>
-              <div className="font-mono-tabular text-3xl font-bold text-slate-900 mt-1">
-                {filteredQueues.length}
+          {/* Printable & On-Screen Report Container */}
+          <div
+            id="report-print-area"
+            className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6"
+          >
+            {/* Official Report Header (Kop + Periode + Nama Pimpinan) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b-2 border-slate-900">
+              <div className="flex items-center gap-4">
+                <BrandLogo
+                  logoUrl={settings.logo_url}
+                  altText={settings.header_text}
+                  sizeClass="w-14 h-14"
+                />
+                <div>
+                  <div className="font-display text-xl font-bold text-slate-900">
+                    {settings.header_text}
+                  </div>
+                  <div className="text-xs sm:text-sm text-slate-600">
+                    {settings.subheader_text}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <div className="text-xs font-medium text-slate-500">Selesai Dilayani</div>
-              <div className="font-mono-tabular text-3xl font-bold text-emerald-700 mt-1">
-                {totalCompleted}
-              </div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <div className="text-xs font-medium text-slate-500">Menunggu / Dipanggil</div>
-              <div className="font-mono-tabular text-3xl font-bold text-amber-600 mt-1">
-                {totalActive}
-              </div>
-            </div>
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <div className="text-xs font-medium text-slate-500">Layanan Tertinggi</div>
-              <div className="font-display text-lg font-bold text-slate-900 mt-2 truncate">
-                {topService && topService.count > 0 ? topService.service.service_name : '-'}
-              </div>
-            </div>
-          </div>
 
-          {/* Table & Chart.js Doughnut */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-            <div className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6">
-              <h3 className="font-display text-lg font-bold text-slate-900 pb-4 border-b border-slate-100">
-                Agregasi Pemohon per Jenis Layanan
-              </h3>
+              <div className="text-left sm:text-right text-xs text-slate-700 space-y-0.5">
+                <div className="font-display font-bold text-sm text-slate-900">
+                  Laporan Rekapitulasi Pelayanan
+                </div>
+                <div>
+                  Periode:{' '}
+                  <span className="font-mono-tabular font-semibold text-slate-900">
+                    {startDate} s/d {endDate}
+                  </span>
+                </div>
+                <div>
+                  Pimpinan:{' '}
+                  <span className="font-semibold text-slate-900">{pimpinanDisplayName}</span>
+                </div>
+              </div>
+            </div>
 
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
-                      <th className="py-2.5 pr-4">Jenis Layanan</th>
-                      <th className="py-2.5 px-3 text-right">Pemohon</th>
-                      <th className="py-2.5 px-3 text-right">Selesai</th>
-                      <th className="py-2.5 px-3 text-right">Aktif</th>
-                      <th className="py-2.5 pl-3 text-right">Persentase</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-sm">
-                    {serviceSummary.map((row) => (
-                      <tr key={row.service.id} className="hover:bg-slate-50">
-                        <td className="py-3 pr-4 font-semibold text-slate-900">
-                          {row.service.service_name}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono-tabular font-bold text-slate-900">
-                          {row.count}
+            {/* 4-Column KPI Row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="text-xs font-medium text-slate-500">Total Pemohon</div>
+                <div className="font-mono-tabular text-2xl sm:text-3xl font-bold text-slate-900 mt-1">
+                  {filteredQueues.length}
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="text-xs font-medium text-slate-500">Selesai Dilayani</div>
+                <div className="font-mono-tabular text-2xl sm:text-3xl font-bold text-emerald-700 mt-1">
+                  {totalCompleted}
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="text-xs font-medium text-slate-500">Menunggu / Dipanggil</div>
+                <div className="font-mono-tabular text-2xl sm:text-3xl font-bold text-amber-600 mt-1">
+                  {totalActive}
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="text-xs font-medium text-slate-500">Layanan Tertinggi</div>
+                <div className="font-display text-base sm:text-lg font-bold text-slate-900 mt-2 truncate">
+                  {topService && topService.count > 0 ? topService.service.service_name : '-'}
+                </div>
+              </div>
+            </div>
+
+            {/* Table & Chart.js Doughnut */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              <div className="lg:col-span-7 print:col-span-12">
+                <h3 className="font-display text-base sm:text-lg font-bold text-slate-900 pb-3 border-b border-slate-200">
+                  Data Jumlah Pemohon per Layanan ({startDate} s/d {endDate})
+                </h3>
+
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-300 text-xs font-semibold text-slate-600">
+                        <th className="py-2.5 pr-4">Jenis Layanan</th>
+                        <th className="py-2.5 px-3 text-right">Jumlah Pemohon</th>
+                        <th className="py-2.5 px-3 text-right">Selesai</th>
+                        <th className="py-2.5 px-3 text-right">Aktif</th>
+                        <th className="py-2.5 pl-3 text-right">Persentase</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 text-sm">
+                      {serviceSummary.map((row) => (
+                        <tr key={row.service.id}>
+                          <td className="py-3 pr-4 font-semibold text-slate-900">
+                            {row.service.service_name}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono-tabular font-bold text-slate-900">
+                            {row.count}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono-tabular text-emerald-700">
+                            {row.completed}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono-tabular text-slate-600">
+                            {row.active}
+                          </td>
+                          <td className="py-3 pl-3 text-right font-mono-tabular text-slate-700">
+                            {row.percentage.toFixed(1)}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-900 text-sm font-bold text-slate-900">
+                        <td className="py-3 pr-4">Total Keseluruhan</td>
+                        <td className="py-3 px-3 text-right font-mono-tabular">
+                          {filteredQueues.length}
                         </td>
                         <td className="py-3 px-3 text-right font-mono-tabular text-emerald-700">
-                          {row.completed}
+                          {totalCompleted}
                         </td>
-                        <td className="py-3 px-3 text-right font-mono-tabular text-slate-600">
-                          {row.active}
-                        </td>
-                        <td className="py-3 pl-3 text-right font-mono-tabular text-slate-700">
-                          {row.percentage.toFixed(1)}%
+                        <td className="py-3 px-3 text-right font-mono-tabular">{totalActive}</td>
+                        <td className="py-3 pl-3 text-right font-mono-tabular">
+                          {filteredQueues.length > 0 ? '100.0%' : '0.0%'}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-slate-200 text-sm font-bold text-slate-900">
-                      <td className="py-3 pr-4">Total Keseluruhan</td>
-                      <td className="py-3 px-3 text-right font-mono-tabular">
-                        {filteredQueues.length}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono-tabular text-emerald-700">
-                        {totalCompleted}
-                      </td>
-                      <td className="py-3 px-3 text-right font-mono-tabular">{totalActive}</td>
-                      <td className="py-3 pl-3 text-right font-mono-tabular">
-                        {filteredQueues.length > 0 ? '100.0%' : '0.0%'}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div className="lg:col-span-5 no-print flex flex-col">
+                <h3 className="font-display text-base sm:text-lg font-bold text-slate-900 pb-3 border-b border-slate-200">
+                  Distribusi Layanan (Chart.js)
+                </h3>
+                <div className="relative h-[290px] mt-4">
+                  {filteredQueues.length > 0 ? (
+                    <canvas ref={canvasRef} />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-slate-500">
+                      Tidak ada transaksi pada rentang tanggal yang dipilih.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 flex flex-col">
-              <h3 className="font-display text-lg font-bold text-slate-900 pb-4 border-b border-slate-100">
-                Distribusi Layanan (Chart.js)
-              </h3>
-              <div className="relative flex-1 min-h-[290px] mt-4">
-                {filteredQueues.length > 0 ? (
-                  <canvas ref={canvasRef} />
-                ) : (
-                  <div className="h-full flex items-center justify-center text-sm text-slate-500">
-                    Tidak ada transaksi pada rentang tanggal yang dipilih.
-                  </div>
-                )}
+            {/* Pimpinan Signature Block (Appears cleanly on screen & PDF print) */}
+            <div className="pt-6 border-t border-slate-200 flex justify-end">
+              <div className="text-center min-w-[240px]">
+                <div className="text-xs text-slate-600">
+                  Tulangan, {formatIndonesianDate(todayISO)}
+                </div>
+                <div className="text-xs font-semibold text-slate-800 mt-1">
+                  Mengetahui, Pimpinan
+                </div>
+                <div className="h-14" />
+                <div className="font-display text-sm font-bold text-slate-900 underline underline-offset-4">
+                  {pimpinanDisplayName}
+                </div>
               </div>
             </div>
           </div>

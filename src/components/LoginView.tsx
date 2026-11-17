@@ -110,47 +110,52 @@ export const LoginView: React.FC<LoginViewProps> = ({ users, onLoginSuccess }) =
             </p>
 
             <div className="mt-5 space-y-3">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('petugas')}
-                className="w-full text-left p-3.5 rounded-xl bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-400 transition-colors flex items-center gap-3 cursor-pointer"
-              >
-                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900">Masuk sebagai Petugas</div>
-                  <div className="text-xs text-slate-500 font-mono-tabular">petugas / 12345</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin')}
-                className="w-full text-left p-3.5 rounded-xl bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-400 transition-colors flex items-center gap-3 cursor-pointer"
-              >
-                <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900">Masuk sebagai Admin</div>
-                  <div className="text-xs text-slate-500 font-mono-tabular">admin / 12345</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('pimpinan')}
-                className="w-full text-left p-3.5 rounded-xl bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-400 transition-colors flex items-center gap-3 cursor-pointer"
-              >
-                <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                  <BarChart3 className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900">Masuk sebagai Pimpinan</div>
-                  <div className="text-xs text-slate-500 font-mono-tabular">pimpinan / 12345</div>
-                </div>
-              </button>
+              {(['petugas', 'admin', 'pimpinan'] as UserRole[]).map((role) => {
+                const roleUser = users.find((u) => u.role === role);
+                const roleLabel =
+                  role === 'petugas'
+                    ? 'Masuk sebagai Petugas'
+                    : role === 'admin'
+                    ? 'Masuk sebagai Admin'
+                    : 'Masuk sebagai Pimpinan';
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    onClick={() => handleQuickLogin(role)}
+                    disabled={!roleUser}
+                    className="w-full text-left p-3.5 rounded-xl bg-white hover:bg-emerald-50 disabled:opacity-50 border border-slate-200 hover:border-emerald-400 transition-colors flex items-center gap-3 cursor-pointer"
+                  >
+                    <div
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                        role === 'petugas'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : role === 'admin'
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {role === 'petugas' ? (
+                        <UserCheck className="w-5 h-5" />
+                      ) : role === 'admin' ? (
+                        <ShieldCheck className="w-5 h-5" />
+                      ) : (
+                        <BarChart3 className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">
+                        {roleLabel}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">
+                        {roleUser
+                          ? `${roleUser.full_name} · ${roleUser.username}`
+                          : 'Belum ada akun'}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
