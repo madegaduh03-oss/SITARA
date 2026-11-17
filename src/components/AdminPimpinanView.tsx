@@ -25,13 +25,16 @@ import {
   Pencil,
   Check,
   X,
+  Layers,
 } from 'lucide-react';
 import { Counter, QueueItem, Service, Settings, User } from '../types/sitara';
 import { DEFAULT_LOGO_DATA_URI } from '../data/sqlSchema';
 import {
   addCounter,
   addDaysISO,
+  addService,
   deleteCounter,
+  deleteService,
   getTodayISO,
   initializeDatabase,
   renameCounter,
@@ -39,8 +42,10 @@ import {
   saveSettings,
   simulateNextDay,
   toggleCounterActive,
+  toggleServiceActive,
+  updateService,
 } from '../utils/storage';
-import { BrandLogo } from './DynamicBrandHeader';
+import { BrandLogo, ServiceIcon } from './DynamicBrandHeader';
 
 Chart.register(DoughnutController, ArcElement, Tooltip, Legend);
 
@@ -54,6 +59,17 @@ interface AdminPimpinanViewProps {
 
 const CHART_COLORS = ['#059669', '#0f172a', '#d97706', '#2563eb', '#64748b'];
 
+const SERVICE_ICON_OPTIONS: Array<{ value: Service['icon']; label: string }> = [
+  { value: 'id-card', label: 'Kartu ID' },
+  { value: 'users', label: 'Keluarga' },
+  { value: 'baby', label: 'Anak' },
+  { value: 'smartphone', label: 'Digital' },
+  { value: 'file-text', label: 'Dokumen' },
+  { value: 'building', label: 'Instansi' },
+  { value: 'clipboard-check', label: 'Verifikasi' },
+  { value: 'shield-check', label: 'Perizinan' },
+];
+
 export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
   user,
   settings,
@@ -62,7 +78,7 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
   queues,
 }) => {
   const isAdmin = user.role === 'admin';
-  const [activeTab, setActiveTab] = useState<'branding' | 'counters' | 'report'>(
+  const [activeTab, setActiveTab] = useState<'branding' | 'counters' | 'services' | 'report'>(
     isAdmin ? 'branding' : 'report'
   );
 
@@ -76,6 +92,15 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
   const [newCounterName, setNewCounterName] = useState<string>('');
   const [editingCounterId, setEditingCounterId] = useState<number | null>(null);
   const [editingCounterName, setEditingCounterName] = useState<string>('');
+
+  // Atur Layanan state
+  const [newServiceName, setNewServiceName] = useState<string>('');
+  const [newServiceDesc, setNewServiceDesc] = useState<string>('');
+  const [newServiceIcon, setNewServiceIcon] = useState<Service['icon']>('file-text');
+  const [editingServiceId, setEditingServiceId] = useState<number | null>(null);
+  const [editServiceName, setEditServiceName] = useState<string>('');
+  const [editServiceDesc, setEditServiceDesc] = useState<string>('');
+  const [editServiceIcon, setEditServiceIcon] = useState<Service['icon']>('file-text');
 
   // Sync draft when external reset happens
   useEffect(() => {
@@ -156,6 +181,55 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
 
   const handleDeleteCounter = (counterId: number) => {
     const res = deleteCounter(counterId);
+    showNotice(res.success ? 'ok' : 'err', res.message);
+  };
+
+  const handleAddService = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newServiceName.trim()) {
+      showNotice('err', 'Nama jenis layanan wajib diisi.');
+      return;
+    }
+    const created = addService({
+      service_name: newServiceName,
+      description: newServiceDesc,
+      icon: newServiceIcon,
+    });
+    setNewServiceName('');
+    setNewServiceDesc('');
+    setNewServiceIcon('file-text');
+    showNotice(
+      'ok',
+      `Jenis layanan "${created.service_name}" berhasil ditambahkan dan langsung tampil di Kiosk Pemohon.`
+    );
+  };
+
+  const handleStartEditService = (srv: Service) => {
+    setEditingServiceId(srv.id);
+    setEditServiceName(srv.service_name);
+    setEditServiceDesc(srv.description);
+    setEditServiceIcon(srv.icon);
+  };
+
+  const handleSaveEditService = (serviceId: number) => {
+    const res = updateService(serviceId, {
+      service_name: editServiceName,
+      description: editServiceDesc,
+      icon: editServiceIcon,
+    });
+    showNotice(res.success ? 'ok' : 'err', res.message);
+    if (res.success) {
+      setEditingServiceId(null);
+    }
+  };
+
+  const handleToggleService = (serviceId: number) => {
+    const res = toggleServiceActive(serviceId);
+    showNotice(res.success ? 'ok' : 'err', res.message);
+  };
+
+  const handleDeleteService = (serviceId: number) => {
+    const res = deleteService(serviceId);
     showNotice(res.success ? 'ok' : 'err', res.message);
   };
 
@@ -343,6 +417,18 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
               >
                 <MonitorCheck className="w-3.5 h-3.5" />
                 <span>Atur Loket</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('services')}
+                className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                  activeTab === 'services'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Atur Layanan</span>
               </button>
             </>
           )}
@@ -726,7 +812,252 @@ export const AdminPimpinanView: React.FC<AdminPimpinanViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: LAPORAN REKAPITULASI (ADMIN & PIMPINAN) */}
+      {/* TAB 3: MENU ATUR LAYANAN (TAMBAH, EDIT NAMA/DESKRIPSI/IKON, AKTIF/NONAKTIFKAN) */}
+      {isAdmin && activeTab === 'services' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Tambah Jenis Layanan Baru */}
+          <form
+            onSubmit={handleAddService}
+            className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-6 space-y-4"
+          >
+            <div className="border-b border-slate-100 pb-4">
+              <h3 className="font-display text-lg font-bold text-slate-900">
+                Tambah Jenis Layanan
+              </h3>
+              <p className="text-xs text-slate-600 mt-1">
+                Layanan baru langsung tampil sebagai tombol pilihan di Kiosk Pemohon.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-service-name"
+                className="block text-sm font-semibold text-slate-800 mb-1.5"
+              >
+                Nama Jenis Layanan
+              </label>
+              <input
+                id="new-service-name"
+                type="text"
+                value={newServiceName}
+                onChange={(e) => setNewServiceName(e.target.value)}
+                placeholder="Misal: Surat Pindah Datang"
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                required
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="new-service-desc"
+                className="block text-sm font-semibold text-slate-800 mb-1.5"
+              >
+                Deskripsi Layanan
+              </label>
+              <textarea
+                id="new-service-desc"
+                rows={3}
+                value={newServiceDesc}
+                onChange={(e) => setNewServiceDesc(e.target.value)}
+                placeholder="Jelaskan secara singkat dokumen atau keperluan yang dilayani..."
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              />
+            </div>
+
+            <div>
+              <span className="block text-sm font-semibold text-slate-800 mb-2">
+                Ikon Layanan
+              </span>
+              <div className="grid grid-cols-4 gap-2">
+                {SERVICE_ICON_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setNewServiceIcon(opt.value)}
+                    title={opt.label}
+                    className={`p-2.5 rounded-lg border flex flex-col items-center gap-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                      newServiceIcon === opt.value
+                        ? 'bg-emerald-700 border-emerald-700 text-white'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ServiceIcon icon={opt.value} className="w-4 h-4" />
+                    <span className="truncate w-full text-center">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Layanan</span>
+            </button>
+
+            <div className="pt-3 border-t border-slate-100 text-xs text-slate-600 flex items-center justify-between">
+              <span>Layanan Aktif di Kiosk</span>
+              <span className="font-mono-tabular font-bold text-emerald-700">
+                {services.filter((s) => s.is_active).length} dari {services.length}
+              </span>
+            </div>
+          </form>
+
+          {/* Daftar & Edit Jenis Layanan */}
+          <div className="lg:col-span-8 bg-white border border-slate-200 rounded-2xl p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="font-display text-lg font-bold text-slate-900">
+                  Daftar Jenis Layanan & Deskripsi
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Klik Edit untuk memperbarui nama, deskripsi, atau ikon layanan yang tampil di
+                  Kiosk Pemohon.
+                </p>
+              </div>
+              <span className="text-xs font-medium text-slate-500 tabular-nums">
+                {services.length} jenis layanan
+              </span>
+            </div>
+
+            <div className="mt-4 divide-y divide-slate-100">
+              {services.map((srv) => {
+                const isEditing = editingServiceId === srv.id;
+
+                return (
+                  <div key={srv.id} className="py-4">
+                    {isEditing ? (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              Nama Jenis Layanan
+                            </label>
+                            <input
+                              type="text"
+                              value={editServiceName}
+                              onChange={(e) => setEditServiceName(e.target.value)}
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">
+                              Ikon
+                            </label>
+                            <select
+                              value={editServiceIcon}
+                              onChange={(e) => setEditServiceIcon(e.target.value as Service['icon'])}
+                              className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                            >
+                              {SERVICE_ICON_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">
+                            Deskripsi Layanan
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={editServiceDesc}
+                            onChange={(e) => setEditServiceDesc(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingServiceId(null)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Batal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEditService(srv.id)}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Simpan Perubahan</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
+                            <ServiceIcon icon={srv.icon} className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-display font-bold text-base text-slate-900">
+                                {srv.service_name}
+                              </span>
+                              <span
+                                className={`text-xs font-semibold ${
+                                  srv.is_active ? 'text-emerald-700' : 'text-slate-500'
+                                }`}
+                              >
+                                · {srv.is_active ? 'Aktif di Kiosk' : 'Nonaktif'}
+                              </span>
+                            </div>
+                            <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-snug">
+                              {srv.description}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditService(srv)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-800 transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleService(srv.id)}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                              srv.is_active
+                                ? 'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100'
+                                : 'bg-emerald-700 border-emerald-700 text-white hover:bg-emerald-800'
+                            }`}
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            <span>{srv.is_active ? 'Nonaktifkan' : 'Aktifkan'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteService(srv.id)}
+                            className="inline-flex items-center justify-center p-2 rounded-lg border border-slate-200 text-slate-500 hover:text-red-700 hover:border-red-200 hover:bg-red-50 transition-colors cursor-pointer"
+                            aria-label={`Hapus layanan ${srv.service_name}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: LAPORAN REKAPITULASI (ADMIN & PIMPINAN) */}
       {activeTab === 'report' && (
         <div className="space-y-6">
           {/* Filter Bar */}

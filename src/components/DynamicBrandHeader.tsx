@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { Building2, CreditCard, Users, Baby, Smartphone, FileText } from 'lucide-react';
+import {
+  Building2,
+  CreditCard,
+  Users,
+  Baby,
+  Smartphone,
+  FileText,
+  ClipboardCheck,
+  ShieldCheck,
+} from 'lucide-react';
 import { Service, Settings } from '../types/sitara';
 
 interface BrandLogoProps {
@@ -102,6 +111,12 @@ export const ServiceIcon: React.FC<{ icon: Service['icon']; className?: string }
       return <Baby className={className} />;
     case 'smartphone':
       return <Smartphone className={className} />;
+    case 'building':
+      return <Building2 className={className} />;
+    case 'clipboard-check':
+      return <ClipboardCheck className={className} />;
+    case 'shield-check':
+      return <ShieldCheck className={className} />;
     default:
       return <FileText className={className} />;
   }

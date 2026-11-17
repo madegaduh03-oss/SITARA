@@ -300,6 +300,34 @@
       t.is_active = t.is_active === false ? true : false;
       setDB(KEYS.COUNTERS, cs); render();
     }
+    function addNewService(e) {
+      e.preventDefault();
+      const srvs = getDB(KEYS.SERVICES, []);
+      const name = (document.getElementById('new-srv-name').value || '').trim();
+      if (!name) return;
+      const desc = (document.getElementById('new-srv-desc').value || '').trim() || 'Pelayanan administrasi kecamatan';
+      const nextId = srvs.reduce((m, s) => Math.max(m, s.id), 0) + 1;
+      srvs.push({ id: nextId, service_name: name, description: desc, icon: 'file-text', is_active: true });
+      setDB(KEYS.SERVICES, srvs); render();
+    }
+    function saveEditService(id) {
+      const srvs = getDB(KEYS.SERVICES, []);
+      const t = srvs.find(s => s.id === id); if (!t) return;
+      const name = (document.getElementById('edit-srv-name-' + id).value || '').trim();
+      const desc = (document.getElementById('edit-srv-desc-' + id).value || '').trim();
+      if (!name) { alert('Nama layanan wajib diisi.'); return; }
+      t.service_name = name;
+      t.description = desc || t.description;
+      window._editingSrvId = null;
+      setDB(KEYS.SERVICES, srvs); render();
+    }
+    function toggleServiceStatus(id) {
+      const srvs = getDB(KEYS.SERVICES, []);
+      const t = srvs.find(s => s.id === id); if (!t) return;
+      if (t.is_active !== false && srvs.filter(s => s.is_active !== false).length <= 1) { alert('Minimal 1 layanan harus aktif.'); return; }
+      t.is_active = t.is_active === false ? true : false;
+      setDB(KEYS.SERVICES, srvs); render();
+    }
     function simNextDay() { const s = getDB(KEYS.SETTINGS, {}); s.active_date = addDays(s.active_date, 1); setDB(KEYS.SETTINGS, s); render(); }
 
     function render() {
@@ -323,7 +351,7 @@
             <div class="text-sm text-slate-600">Tanggal Aktif: <b class="font-mono-tabular text-slate-900">${s.active_date}</b> · Berikutnya: <b class="font-mono-tabular text-emerald-700">${nextNum}</b></div>
           </div>
           <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            ${srvs.map(x => `<button onclick="takeTicket(${x.id})" class="text-left bg-slate-50 hover:bg-emerald-700 hover:text-white border border-slate-200 rounded-xl p-6 transition-colors min-h-[130px]">
+            ${srvs.filter(x => x.is_active !== false).map(x => `<button onclick="takeTicket(${x.id})" class="text-left bg-slate-50 hover:bg-emerald-700 hover:text-white border border-slate-200 rounded-xl p-6 transition-colors min-h-[130px]">
               <div class="font-display text-lg font-bold">${x.service_name}</div>
               <p class="text-sm opacity-80 mt-1">${x.description}</p>
             </button>`).join('')}
@@ -406,7 +434,7 @@
           <div class="bg-white border rounded-2xl p-6 flex flex-wrap justify-between items-center gap-4">
             <div><h2 class="font-display text-xl font-bold">${user.full_name}</h2><p class="text-xs text-slate-500">Tanggal Aktif: ${s.active_date}</p></div>
             <div class="flex flex-wrap gap-2">
-              ${user.role==='admin'?`<button onclick="adminTab='branding';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='branding'?'bg-slate-900 text-white':'bg-slate-100'}">Edit Tampilan</button><button onclick="adminTab='counters';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='counters'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Loket</button>`:''}
+              ${user.role==='admin'?`<button onclick="adminTab='branding';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='branding'?'bg-slate-900 text-white':'bg-slate-100'}">Edit Tampilan</button><button onclick="adminTab='counters';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='counters'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Loket</button><button onclick="adminTab='services';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='services'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Layanan</button>`:''}
               <button onclick="adminTab='report';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='report'?'bg-slate-900 text-white':'bg-slate-100'}">Rekapitulasi</button>
             </div>
           </div>
@@ -440,6 +468,36 @@
                   <div><div class="font-bold text-sm">${c.counter_name}</div><div class="text-xs ${c.is_active?'text-emerald-700':'text-slate-500'}">${c.is_active?'Status: Aktif':'Status: Nonaktif'}</div></div>
                   <button onclick="toggleCounterStatus(${c.id})" class="px-3 py-1.5 rounded-lg text-xs font-semibold border ${c.is_active?'bg-amber-50 border-amber-300 text-amber-900':'bg-emerald-700 text-white'}">${c.is_active?'Nonaktifkan':'Aktifkan'}</button>
                 </div>`).join('')}
+              </div>
+            </div>
+          ` : user.role==='admin' && adminTab==='services' ? `
+            <div class="grid md:grid-cols-12 gap-6">
+              <form onsubmit="addNewService(event)" class="md:col-span-4 bg-white border rounded-2xl p-6 space-y-4">
+                <h3 class="font-display font-bold">Tambah Jenis Layanan</h3>
+                <input id="new-srv-name" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Nama Layanan" required />
+                <textarea id="new-srv-desc" rows="3" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Deskripsi singkat layanan..."></textarea>
+                <button class="w-full py-2.5 rounded-lg bg-emerald-700 text-white text-sm font-semibold">+ Tambah Layanan</button>
+              </form>
+              <div class="md:col-span-8 bg-white border rounded-2xl p-6 divide-y">
+                ${srvs.map(sv => window._editingSrvId === sv.id ? `
+                  <div class="py-3 space-y-2">
+                    <input id="edit-srv-name-${sv.id}" value="${sv.service_name}" class="w-full px-3 py-2 border rounded-lg text-sm font-semibold" />
+                    <textarea id="edit-srv-desc-${sv.id}" rows="2" class="w-full px-3 py-2 border rounded-lg text-sm">${sv.description}</textarea>
+                    <div class="flex gap-2 justify-end">
+                      <button type="button" onclick="window._editingSrvId=null;render()" class="px-3 py-1.5 rounded-lg border text-xs">Batal</button>
+                      <button type="button" onclick="saveEditService(${sv.id})" class="px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold">Simpan</button>
+                    </div>
+                  </div>` : `
+                  <div class="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div class="font-bold text-sm">${sv.service_name} <span class="text-xs font-normal ${sv.is_active!==false?'text-emerald-700':'text-slate-500'}">· ${sv.is_active!==false?'Aktif':'Nonaktif'}</span></div>
+                      <div class="text-xs text-slate-600 mt-0.5">${sv.description}</div>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                      <button onclick="window._editingSrvId=${sv.id};render()" class="px-3 py-1.5 rounded-lg border text-xs font-semibold">Edit</button>
+                      <button onclick="toggleServiceStatus(${sv.id})" class="px-3 py-1.5 rounded-lg text-xs font-semibold border ${sv.is_active!==false?'bg-amber-50 border-amber-300 text-amber-900':'bg-emerald-700 text-white'}">${sv.is_active!==false?'Nonaktifkan':'Aktifkan'}</button>
+                    </div>
+                  </div>`).join('')}
               </div>
             </div>
           ` : `

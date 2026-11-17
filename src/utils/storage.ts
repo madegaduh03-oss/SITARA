@@ -586,3 +586,99 @@ export function deleteCounter(counterId: number): { success: boolean; message: s
   return { success: true, message: `${target.counter_name} berhasil dihapus.` };
 }
 
+export function addService(payload: {
+  service_name: string;
+  description: string;
+  icon: Service['icon'];
+}): Service {
+  const services = getServices();
+  const nextId = services.reduce((max, s) => Math.max(max, s.id), 0) + 1;
+  const newService: Service = {
+    id: nextId,
+    service_name: payload.service_name.trim(),
+    description: payload.description.trim() || 'Pelayanan administrasi kecamatan',
+    icon: payload.icon,
+    is_active: true,
+  };
+  writeJSON(STORAGE_KEYS.SERVICES, [...services, newService]);
+  broadcastSync('services-updated');
+  return newService;
+}
+
+export function updateService(
+  serviceId: number,
+  payload: { service_name: string; description: string; icon: Service['icon'] }
+): { success: boolean; message: string } {
+  const services = getServices();
+  const target = services.find((s) => s.id === serviceId);
+  if (!target) {
+    return { success: false, message: 'Jenis layanan tidak ditemukan.' };
+  }
+  const trimmedName = payload.service_name.trim();
+  if (!trimmedName) {
+    return { success: false, message: 'Nama jenis layanan wajib diisi.' };
+  }
+
+  const updated = services.map((s) =>
+    s.id === serviceId
+      ? {
+          ...s,
+          service_name: trimmedName,
+          description: payload.description.trim() || s.description,
+          icon: payload.icon,
+        }
+      : s
+  );
+  writeJSON(STORAGE_KEYS.SERVICES, updated);
+  broadcastSync('services-updated');
+  return { success: true, message: `Layanan "${trimmedName}" berhasil diperbarui.` };
+}
+
+export function toggleServiceActive(serviceId: number): { success: boolean; message: string } {
+  const services = getServices();
+  const target = services.find((s) => s.id === serviceId);
+  if (!target) {
+    return { success: false, message: 'Jenis layanan tidak ditemukan.' };
+  }
+  if (target.is_active) {
+    const activeCount = services.filter((s) => s.is_active).length;
+    if (activeCount <= 1) {
+      return { success: false, message: 'Minimal 1 jenis layanan harus aktif di Kiosk Pemohon.' };
+    }
+  }
+  const updated = services.map((s) =>
+    s.id === serviceId ? { ...s, is_active: !s.is_active } : s
+  );
+  writeJSON(STORAGE_KEYS.SERVICES, updated);
+  broadcastSync('services-updated');
+  return {
+    success: true,
+    message: `Layanan "${target.service_name}" berhasil ${!target.is_active ? 'diaktifkan' : 'dinonaktifkan'}.`,
+  };
+}
+
+export function deleteService(serviceId: number): { success: boolean; message: string } {
+  const services = getServices();
+  const target = services.find((s) => s.id === serviceId);
+  if (!target) {
+    return { success: false, message: 'Jenis layanan tidak ditemukan.' };
+  }
+  const remainingActive = services.filter((s) => s.id !== serviceId && s.is_active).length;
+  if (remainingActive < 1) {
+    return { success: false, message: 'Minimal 1 jenis layanan aktif harus dipertahankan.' };
+  }
+  const queues = getQueues();
+  const hasHistory = queues.some((q) => q.service_id === serviceId);
+  if (hasHistory) {
+    return {
+      success: false,
+      message: `Layanan "${target.service_name}" memiliki riwayat transaksi antrean. Nonaktifkan saja agar laporan rekapitulasi tetap akurat.`,
+    };
+  }
+  const updated = services.filter((s) => s.id !== serviceId);
+  writeJSON(STORAGE_KEYS.SERVICES, updated);
+  broadcastSync('services-updated');
+  return { success: true, message: `Layanan "${target.service_name}" berhasil dihapus.` };
+}
+
+

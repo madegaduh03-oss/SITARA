@@ -16,7 +16,15 @@ export interface Service {
   id: number;
   service_name: string;
   description: string;
-  icon: 'id-card' | 'users' | 'baby' | 'smartphone' | 'file-text';
+  icon:
+    | 'id-card'
+    | 'users'
+    | 'baby'
+    | 'smartphone'
+    | 'file-text'
+    | 'building'
+    | 'clipboard-check'
+    | 'shield-check';
   is_active: boolean;
 }
 
