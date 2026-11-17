@@ -1,0 +1,6 @@
+{
+  "name": "SITARA — Kecamatan Tulangan",
+  "description": "Sistem Informasi Antrean dan Rekapitulasi Pelayanan Kecamatan Tulangan, Kabupaten Sidoarjo (PRD v2.1)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

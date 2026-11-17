@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SITARA v2.1 — Sistem Informasi Antrean Kecamatan Tulangan</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-sans: 'Public Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    body { font-family: var(--font-sans); background: #f8fafc; color: #0f172a; }
+    h1, h2, h3, h4, .font-display { font-family: var(--font-display); }
+    .font-mono-tabular { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+    @media print {
+      body * { visibility: hidden !important; }
+      #receipt-print-area, #receipt-print-area * { visibility: visible !important; }
+      #receipt-print-area {
+        position: fixed !important; left: 0 !important; top: 0 !important;
+        width: 58mm !important; padding: 4mm !important; margin: 0 !important;
+        background: #fff !important; color: #000 !important; border: none !important;
+      }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <header id="app-topbar" class="no-print sticky top-0 z-40 bg-white border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
+      <button onclick="navigate('kiosk')" class="font-display text-lg font-extrabold tracking-tight text-slate-900 whitespace-nowrap shrink-0">SITARA</button>
+      <nav class="flex items-center gap-6 overflow-x-auto text-sm font-medium">
+        <button data-nav="kiosk" onclick="navigate('kiosk')" class="nav-link py-1 whitespace-nowrap shrink-0 border-b-2 border-transparent text-slate-600 hover:text-slate-900">Kiosk Pemohon</button>
+        <button data-nav="monitor" onclick="navigate('monitor')" class="nav-link py-1 whitespace-nowrap shrink-0 border-b-2 border-transparent text-slate-600 hover:text-slate-900">Layar Monitor</button>
+        <button data-nav="internal" onclick="navigate('internal')" class="nav-link py-1 whitespace-nowrap shrink-0 border-b-2 border-transparent text-slate-600 hover:text-slate-900">Portal Internal</button>
+      </nav>
+      <div id="topbar-auth-action" class="shrink-0"></div>
+    </div>
+  </header>
+
+  <main id="app-root" class="flex-1"></main>
+
+  <!-- Modal Struk 58mm -->
+  <div id="receipt-modal" class="hidden fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4">
+    <div class="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+        <h3 class="font-display text-lg font-bold text-slate-900">Pratinjau Struk 58mm</h3>
+        <button onclick="closeReceiptModal()" class="p-2 rounded-lg text-slate-500 hover:bg-slate-100">✕</button>
+      </div>
+      <div class="mt-4 flex justify-center bg-slate-100 rounded-xl p-5 border border-slate-200">
+        <div id="receipt-print-area" class="w-[228px] bg-white border border-dashed border-slate-300 px-4 py-5 text-center text-slate-900"></div>
+      </div>
+      <div id="bt-feedback" class="hidden mt-3 p-3 rounded-lg border text-xs"></div>
+      <div class="mt-5 grid grid-cols-2 gap-3">
+        <button onclick="printViaBluetooth()" class="px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold">Cetak Bluetooth</button>
+        <button onclick="window.print()" class="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold">Cetak Browser</button>
+      </div>
+      <button onclick="closeReceiptModal()" class="mt-3 w-full py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-medium">Tutup</button>
+    </div>
+  </div>
+
+  <script>
+    const DEFAULT_LOGO = 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none"><rect width="120" height="120" rx="20" fill="#0F172A"/><path d="M60 16L96 30V58C96 81.5 80.5 100.8 60 107C39.5 100.8 24 81.5 24 58V30L60 16Z" fill="#065F46" stroke="#FBBF24" stroke-width="3"/><polygon points="60,36 64.5,48.5 78,48.5 67,56.5 71,69 60,61.5 49,69 53,56.5 42,48.5 55.5,48.5" fill="#FBBF24"/></svg>`);
+    const KEYS = {
+      USERS: 'sitara_users', SERVICES: 'sitara_services', COUNTERS: 'sitara_counters',
+      QUEUES: 'sitara_queues', SETTINGS: 'sitara_settings', CALL: 'sitara_call_event',
+      SESSION: 'sitara_session_user', INIT: 'sitara_initialized_v21'
+    };
+
+    let currentModule = 'kiosk';
+    let selectedCounterId = 1;
+    let adminTab = 'branding';
+    let lastReceipt = null;
+    let doughnutChart = null;
+    let lastPlayedCallId = null;
+
+    function todayISO() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+    function addDays(iso, delta) {
+      const [y,m,d] = iso.split('-').map(Number);
+      const dt = new Date(y, m-1, d); dt.setDate(dt.getDate()+delta);
+      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+    }
+    function getDB(key, fb) { try { return JSON.parse(localStorage.getItem(key)) ?? fb; } catch { return fb; } }
+    function setDB(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+    function initDB(force = false) {
+      if (localStorage.getItem(KEYS.INIT) && !force) return;
+      const t = todayISO();
+      setDB(KEYS.USERS, [
+        { id: 1, username: 'petugas', password_hash: '12345', role: 'petugas', full_name: 'Petugas Pelayanan' },
+        { id: 2, username: 'admin', password_hash: '12345', role: 'admin', full_name: 'Administrator Sistem' },
+        { id: 3, username: 'pimpinan', password_hash: '12345', role: 'pimpinan', full_name: 'Camat Tulangan' }
+      ]);
+      setDB(KEYS.SERVICES, [
+        { id: 1, service_name: 'KTP-el', description: 'Perekaman & pencetakan KTP Elektronik', icon: 'credit-card', is_active: true },
+        { id: 2, service_name: 'KK', description: 'Penerbitan & perubahan Kartu Keluarga', icon: 'users', is_active: true },
+        { id: 3, service_name: 'KIA', description: 'Kartu Identitas Anak usia 0–17 tahun', icon: 'baby', is_active: true },
+        { id: 4, service_name: 'Aktivasi IKD', description: 'Aktivasi Identitas Kependudukan Digital', icon: 'smartphone', is_active: true },
+        { id: 5, service_name: 'Layanan Lainnya', description: 'Legalisir, surat keterangan & pengantar', icon: 'file-text', is_active: true }
+      ]);
+      setDB(KEYS.COUNTERS, [1,2,3,4,5].map(i => ({ id: i, counter_name: 'Loket ' + i, status: 'idle', current_queue_id: null, is_active: i <= 4 })));
+      setDB(KEYS.SETTINGS, { id: 1, logo_url: DEFAULT_LOGO, header_text: 'SITARA', subheader_text: 'Sistem Informasi Antrean Kecamatan Tulangan', total_counters: 4, active_date: t });
+      const q = []; const dist = [1,1,2,2,1,4,3,2,5,1,4,2,1,3,5];
+      let idx = 0;
+      for (let off = -13; off <= -1; off++) {
+        const dt = addDays(t, off); const cnt = off % 3 === 0 ? 3 : 4;
+        for (let i = 1; i <= cnt && idx < 47; i++) {
+          q.push({ id: `q-${dt}-${i}`, queue_date: dt, queue_number: String(i).padStart(2,'0'), service_id: dist[idx % dist.length], status: 'completed', counter_id: (idx%4)+1, created_at: `${dt}T09:0${i}:00`, called_at: `${dt}T09:10:00`, completed_at: `${dt}T09:18:00` });
+          idx++;
+        }
+      }
+      while (idx < 47) { const dt = addDays(t,-1); q.push({ id:`q-ex-${idx}`, queue_date: dt, queue_number: String(idx).padStart(2,'0'), service_id: dist[idx%dist.length], status:'completed', counter_id:1, created_at:`${dt}T13:00:00` }); idx++; }
+      [1,2,4].forEach((sid, i) => q.push({ id:`q-${t}-0${i+1}`, queue_date:t, queue_number:String(i+1).padStart(2,'0'), service_id:sid, status:'waiting', counter_id:null, created_at:`${t}T08:0${i*3+1}:00` }));
+      setDB(KEYS.QUEUES, q);
+      localStorage.removeItem(KEYS.CALL);
+      localStorage.setItem(KEYS.INIT, 'true');
+    }
+
+    function nextQueueNumber(queues, activeDate) {
+      if (!queues.length) return '01';
+      const last = queues[queues.length - 1];
+      const todayList = queues.filter(q => q.queue_date === activeDate);
+      if (last.queue_date !== activeDate && todayList.length === 0) return '01';
+      if (todayList.length === 0) return '01';
+      const max = todayList.reduce((m, q) => Math.max(m, parseInt(q.queue_number, 10) || 0), 0);
+      return String(max + 1).padStart(2, '0');
+    }
+
+    function speakQueue(num, counterName) {
+      const words = ['kosong','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan'];
+      let spoken = num;
+      if (num.length === 2 && num.startsWith('0')) spoken = words[+num[0]] + ' ' + words[+num[1]];
+      const cNum = parseInt((counterName.match(/\d+/) || ['1'])[0], 10);
+      const phrase = `Nomor antrean ${spoken}, silakan menuju ke loket ${words[cNum] || cNum}`;
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        [587.33, 739.99, 880].forEach((f, i) => {
+          const o = ctx.createOscillator(), g = ctx.createGain();
+          o.frequency.value = f; g.gain.setValueAtTime(0.001, ctx.currentTime + i*0.18);
+          g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + i*0.18 + 0.03);
+          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i*0.18 + 0.5);
+          o.connect(g); g.connect(ctx.destination);
+          o.start(ctx.currentTime + i*0.18); o.stop(ctx.currentTime + i*0.18 + 0.52);
+        });
+      } catch {}
+      setTimeout(() => {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(phrase);
+          u.lang = 'id-ID'; u.rate = 0.92;
+          window.speechSynthesis.speak(u);
+        }
+      }, 650);
+    }
+
+    function takeTicket(serviceId) {
+      const s = getDB(KEYS.SETTINGS, {});
+      const queues = getDB(KEYS.QUEUES, []);
+      const num = nextQueueNumber(queues, s.active_date);
+      const now = new Date();
+      const time = [now.getHours(), now.getMinutes(), now.getSeconds()].map(x => String(x).padStart(2,'0')).join(':');
+      const ticket = { id: `q-${s.active_date}-${num}-${Date.now()}`, queue_date: s.active_date, queue_number: num, service_id: serviceId, status: 'waiting', counter_id: null, created_at: `${s.active_date}T${time}` };
+      queues.push(ticket);
+      setDB(KEYS.QUEUES, queues);
+      const srv = getDB(KEYS.SERVICES, []).find(x => x.id === serviceId)?.service_name || '-';
+      lastReceipt = { ticket, srv };
+      showReceiptModal(ticket, srv, s);
+      render();
+    }
+
+    function showReceiptModal(ticket, srv, s) {
+      document.getElementById('receipt-print-area').innerHTML = `
+        <img src="${s.logo_url}" class="w-12 h-12 mx-auto rounded-lg object-contain mb-2" />
+        <div class="font-display font-bold text-sm uppercase">${s.header_text}</div>
+        <div class="text-[11px] text-slate-600">${s.subheader_text}</div>
+        <div class="my-3 border-t border-dashed border-slate-400"></div>
+        <div class="text-[11px] font-semibold uppercase text-slate-500">Nomor Antrean Anda</div>
+        <div class="font-mono-tabular text-6xl font-bold my-2">${ticket.queue_number}</div>
+        <div class="text-xs space-y-1 text-left border-t border-dashed border-slate-300 pt-2">
+          <div class="flex justify-between"><span>Layanan:</span><b>${srv}</b></div>
+          <div class="flex justify-between"><span>Tanggal:</span><span class="font-mono-tabular">${ticket.queue_date}</span></div>
+          <div class="flex justify-between"><span>Waktu:</span><span class="font-mono-tabular">${ticket.created_at.split('T')[1]}</span></div>
+        </div>`;
+      document.getElementById('receipt-modal').classList.remove('hidden');
+    }
+    function closeReceiptModal() { document.getElementById('receipt-modal').classList.add('hidden'); }
+
+    async function printViaBluetooth() {
+      const fb = document.getElementById('bt-feedback');
+      fb.classList.remove('hidden');
+      if (!navigator.bluetooth) {
+        fb.className = 'mt-3 p-3 rounded-lg border text-xs bg-amber-50 border-amber-200 text-amber-900';
+        fb.textContent = 'Web Bluetooth tidak didukung browser ini. Gunakan Cetak Browser.';
+        return;
+      }
+      try {
+        const dev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb'] });
+        const srv = await (await dev.gatt.connect()).getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
+        const ch = (await srv.getCharacteristics()).find(c => c.properties.write || c.properties.writeWithoutResponse);
+        const enc = new TextEncoder();
+        const s = getDB(KEYS.SETTINGS, {});
+        const txt = `\x1b@\x1ba\x01${s.header_text}\n${s.subheader_text}\n----------------\n\x1d!\x33${lastReceipt.ticket.queue_number}\n\x1d!\x00${lastReceipt.srv}\n${lastReceipt.ticket.queue_date}\n\n\n\x1dV\x42\x00`;
+        await ch.writeValue(enc.encode(txt));
+        fb.className = 'mt-3 p-3 rounded-lg border text-xs bg-emerald-50 border-emerald-200 text-emerald-900';
+        fb.textContent = 'Struk terkirim ke printer Bluetooth.';
+      } catch (e) {
+        fb.className = 'mt-3 p-3 rounded-lg border text-xs bg-amber-50 border-amber-200 text-amber-900';
+        fb.textContent = 'Koneksi Bluetooth dibatalkan atau gagal: ' + e.message;
+      }
+    }
+
+    function navigate(mod) { currentModule = mod; render(); }
+    function quickLogin(role) {
+      const u = getDB(KEYS.USERS, []).find(x => x.role === role);
+      if (u) { setDB(KEYS.SESSION, u); adminTab = role === 'admin' ? 'branding' : 'report'; navigate('internal'); }
+    }
+    function doLogin(e) {
+      e.preventDefault();
+      const u = document.getElementById('login-u').value.trim().toLowerCase();
+      const p = document.getElementById('login-p').value;
+      const found = getDB(KEYS.USERS, []).find(x => x.username === u && x.password_hash === p);
+      if (!found) { alert('Username atau kata sandi salah.'); return; }
+      setDB(KEYS.SESSION, found); adminTab = found.role === 'admin' ? 'branding' : 'report'; render();
+    }
+    function logout() { localStorage.removeItem(KEYS.SESSION); render(); }
+
+    function callNext() {
+      const s = getDB(KEYS.SETTINGS, {}), qs = getDB(KEYS.QUEUES, []), cs = getDB(KEYS.COUNTERS, []), srvs = getDB(KEYS.SERVICES, []);
+      const cur = cs.find(c => c.id === selectedCounterId);
+      qs.forEach(q => { if (cur?.current_queue_id === q.id && q.status === 'called') q.status = 'completed'; });
+      const next = qs.find(q => q.queue_date === s.active_date && q.status === 'waiting');
+      if (!next) { if (cur) { cur.status = 'idle'; cur.current_queue_id = null; } setDB(KEYS.QUEUES, qs); setDB(KEYS.COUNTERS, cs); render(); return; }
+      next.status = 'called'; next.counter_id = selectedCounterId; next.called_at = new Date().toISOString();
+      if (cur) { cur.status = 'serving'; cur.current_queue_id = next.id; }
+      const srvName = srvs.find(x => x.id === next.service_id)?.service_name || '-';
+      const ev = { event_id: 'c-' + Date.now(), queue_number: next.queue_number, counter_name: 'Loket ' + selectedCounterId, service_name: srvName };
+      setDB(KEYS.QUEUES, qs); setDB(KEYS.COUNTERS, cs); setDB(KEYS.CALL, ev);
+      speakQueue(ev.queue_number, ev.counter_name); render();
+    }
+    function recallCurrent() {
+      const cs = getDB(KEYS.COUNTERS, []), cur = cs.find(c => c.id === selectedCounterId);
+      const q = getDB(KEYS.QUEUES, []).find(x => x.id === cur?.current_queue_id);
+      if (!q) return;
+      const srvName = getDB(KEYS.SERVICES, []).find(x => x.id === q.service_id)?.service_name || '-';
+      const ev = { event_id: 'r-' + Date.now(), queue_number: q.queue_number, counter_name: 'Loket ' + selectedCounterId, service_name: srvName };
+      setDB(KEYS.CALL, ev); speakQueue(ev.queue_number, ev.counter_name); render();
+    }
+    function finishCurrent(status) {
+      const cs = getDB(KEYS.COUNTERS, []), qs = getDB(KEYS.QUEUES, []);
+      const cur = cs.find(c => c.id === selectedCounterId);
+      if (!cur?.current_queue_id) return;
+      qs.forEach(q => { if (q.id === cur.current_queue_id) q.status = status; });
+      cur.status = 'idle'; cur.current_queue_id = null;
+      setDB(KEYS.QUEUES, qs); setDB(KEYS.COUNTERS, cs); render();
+    }
+
+    function saveBranding(e) {
+      e.preventDefault();
+      const s = getDB(KEYS.SETTINGS, {});
+      s.header_text = document.getElementById('adm-header').value.trim() || 'SITARA';
+      s.subheader_text = document.getElementById('adm-sub').value.trim() || 'Sistem Informasi Antrean Kecamatan Tulangan';
+      const urlInput = document.getElementById('adm-logo-url').value.trim();
+      if (window._uploadedLogo) s.logo_url = window._uploadedLogo;
+      else if (urlInput) s.logo_url = urlInput;
+      setDB(KEYS.SETTINGS, s); render();
+    }
+    function handleLogoFile(input) {
+      const f = input.files?.[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => { window._uploadedLogo = r.result; document.getElementById('adm-logo-prev').src = r.result; };
+      r.readAsDataURL(f);
+    }
+    function resetDefaultLogo() {
+      window._uploadedLogo = DEFAULT_LOGO;
+      const s = getDB(KEYS.SETTINGS, {}); s.logo_url = DEFAULT_LOGO; setDB(KEYS.SETTINGS, s); render();
+    }
+    function addNewCounter(e) {
+      e.preventDefault();
+      const cs = getDB(KEYS.COUNTERS, []);
+      const nextId = cs.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+      const name = (document.getElementById('new-loket-name').value || '').trim() || ('Loket ' + nextId);
+      cs.push({ id: nextId, counter_name: name, status: 'idle', current_queue_id: null, is_active: true });
+      setDB(KEYS.COUNTERS, cs); render();
+    }
+    function toggleCounterStatus(id) {
+      const cs = getDB(KEYS.COUNTERS, []);
+      const t = cs.find(c => c.id === id); if (!t) return;
+      if (t.is_active && cs.filter(c => c.is_active !== false).length <= 1) { alert('Minimal 1 loket harus aktif.'); return; }
+      if (t.is_active && t.current_queue_id) { alert('Loket sedang melayani antrean.'); return; }
+      t.is_active = t.is_active === false ? true : false;
+      setDB(KEYS.COUNTERS, cs); render();
+    }
+    function simNextDay() { const s = getDB(KEYS.SETTINGS, {}); s.active_date = addDays(s.active_date, 1); setDB(KEYS.SETTINGS, s); render(); }
+
+    function render() {
+      const s = getDB(KEYS.SETTINGS, {}), srvs = getDB(KEYS.SERVICES, []), qs = getDB(KEYS.QUEUES, []), cs = getDB(KEYS.COUNTERS, []).map((c,i)=>({ ...c, is_active: typeof c.is_active==='boolean'?c.is_active:i<(s.total_counters||4) })), user = getDB(KEYS.SESSION, null), callEv = getDB(KEYS.CALL, null);
+      document.querySelectorAll('.nav-link').forEach(btn => {
+        const active = btn.dataset.nav === currentModule;
+        btn.className = `nav-link py-1 whitespace-nowrap shrink-0 border-b-2 ${active ? 'border-emerald-700 text-slate-900 font-semibold' : 'border-transparent text-slate-600'}`;
+      });
+      document.getElementById('topbar-auth-action').innerHTML = user
+        ? `<button onclick="logout()" class="px-4 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold">Keluar (${user.role})</button>`
+        : `<button onclick="navigate('internal')" class="px-4 py-2 rounded-lg bg-emerald-700 text-white text-xs font-semibold">Login Petugas</button>`;
+
+      const root = document.getElementById('app-root');
+      if (currentModule === 'kiosk') {
+        const nextNum = nextQueueNumber(qs, s.active_date);
+        root.innerHTML = `<div class="max-w-6xl mx-auto px-4 py-8"><div class="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+            <div class="flex items-center gap-4"><img src="${s.logo_url}" class="w-16 h-16 rounded-xl object-contain border border-slate-200 p-1 bg-white" />
+              <div><h1 class="font-display text-2xl sm:text-3xl font-bold">${s.header_text}</h1><p class="text-sm text-slate-600">${s.subheader_text}</p></div>
+            </div>
+            <div class="text-sm text-slate-600">Tanggal Aktif: <b class="font-mono-tabular text-slate-900">${s.active_date}</b> · Berikutnya: <b class="font-mono-tabular text-emerald-700">${nextNum}</b></div>
+          </div>
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${srvs.map(x => `<button onclick="takeTicket(${x.id})" class="text-left bg-slate-50 hover:bg-emerald-700 hover:text-white border border-slate-200 rounded-xl p-6 transition-colors min-h-[130px]">
+              <div class="font-display text-lg font-bold">${x.service_name}</div>
+              <p class="text-sm opacity-80 mt-1">${x.description}</p>
+            </button>`).join('')}
+          </div></div></div>`;
+      } else if (currentModule === 'monitor') {
+        if (callEv && callEv.event_id !== lastPlayedCallId) { lastPlayedCallId = callEv.event_id; speakQueue(callEv.queue_number, callEv.counter_name); }
+        const activeCs = cs.filter(c => c.is_active);
+        root.innerHTML = `<div class="min-h-[calc(100vh-4rem)] bg-slate-950 text-white p-6"><div class="max-w-7xl mx-auto">
+          <div class="flex items-center justify-between pb-6 border-b border-slate-800">
+            <div class="flex items-center gap-4"><img src="${s.logo_url}" class="w-16 h-16 rounded-xl object-contain bg-white p-1" />
+              <div><h1 class="font-display text-3xl font-bold">${s.header_text}</h1><p class="text-sm text-slate-300">${s.subheader_text}</p></div>
+            </div>
+            <button onclick="speakQueue('${callEv?.queue_number||'01'}','${callEv?.counter_name||'Loket 1'}')" class="px-4 py-2 rounded-lg bg-emerald-700 text-xs font-semibold">Uji Suara TTS</button>
+          </div>
+          <div class="mt-6 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center">
+            <div class="text-sm text-emerald-400 font-semibold">Panggilan Antrean Saat Ini</div>
+            <div class="font-mono-tabular text-8xl font-bold my-4">${callEv?.queue_number || '--'}</div>
+            <div class="inline-block px-6 py-2 rounded-xl bg-emerald-700 text-2xl font-bold">${callEv?.counter_name || 'Menunggu Panggilan'}</div>
+            <div class="mt-3 text-sm text-slate-300">${callEv?.service_name || ''}</div>
+          </div>
+          <div class="mt-6 grid grid-cols-2 lg:grid-cols-${activeCs.length} gap-4">
+            ${activeCs.map(c => {
+              const cq = qs.find(q => q.id === c.current_queue_id && q.status === 'called');
+              return `<div class="rounded-xl p-5 bg-slate-900 border ${cq?'border-emerald-600':'border-slate-800'}">
+                <div class="flex justify-between text-sm font-bold"><span>${c.counter_name}</span><span class="${cq?'text-emerald-400':'text-slate-400'}">${cq?'Melayani':'Tersedia'}</span></div>
+                <div class="font-mono-tabular text-4xl font-bold my-3">${cq?cq.queue_number:'--'}</div>
+              </div>`;
+            }).join('')}
+          </div></div></div>`;
+      } else if (currentModule === 'internal' && !user) {
+        root.innerHTML = `<div class="max-w-3xl mx-auto px-4 py-10"><div class="bg-white border border-slate-200 rounded-2xl p-8 grid md:grid-cols-2 gap-8">
+          <form onsubmit="doLogin(event)" class="space-y-4">
+            <h2 class="font-display text-xl font-bold">Login Portal Internal</h2>
+            <input id="login-u" placeholder="Username" class="w-full px-3 py-2 border rounded-lg text-sm" required />
+            <input id="login-p" type="password" placeholder="Kata Sandi" class="w-full px-3 py-2 border rounded-lg text-sm" required />
+            <button class="w-full py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold">Masuk</button>
+          </form>
+          <div class="space-y-3">
+            <h3 class="font-display font-bold text-sm">Quick Login Prototipe</h3>
+            <button onclick="quickLogin('petugas')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">Petugas (petugas / 12345)</button>
+            <button onclick="quickLogin('admin')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">Admin (admin / 12345)</button>
+            <button onclick="quickLogin('pimpinan')" class="w-full p-3 rounded-xl border text-left hover:bg-emerald-50 text-sm font-semibold">Pimpinan (pimpinan / 12345)</button>
+          </div></div></div>`;
+      } else if (user.role === 'petugas') {
+        const activeCs = cs.filter(c => c.is_active);
+        const curC = activeCs.find(c => c.id === selectedCounterId) || activeCs[0];
+        const curQ = qs.find(q => q.id === curC?.current_queue_id && q.status === 'called');
+        const curSrv = curQ ? srvs.find(x => x.id === curQ.service_id)?.service_name : null;
+        const waiting = qs.filter(q => q.queue_date === s.active_date && q.status === 'waiting');
+        root.innerHTML = `<div class="max-w-6xl mx-auto px-4 py-8 space-y-6">
+          <div class="bg-white border rounded-2xl p-6 flex justify-between items-center">
+            <div><h2 class="font-display text-xl font-bold">${user.full_name}</h2><p class="text-xs text-slate-500">${s.active_date}</p></div>
+            <select onchange="selectedCounterId=+this.value;render()" class="px-3 py-2 border rounded-lg text-sm font-semibold">
+              ${activeCs.map(c => `<option value="${c.id}" ${c.id===selectedCounterId?'selected':''}>${c.counter_name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="grid lg:grid-cols-12 gap-6">
+            <div class="lg:col-span-5 bg-white border rounded-2xl p-6 text-center">
+              <div class="flex justify-between items-center border-b pb-3"><span class="text-sm font-semibold">Loket ${selectedCounterId}</span>${curSrv?`<span class="px-2 py-1 rounded bg-emerald-100 text-emerald-900 text-xs font-semibold">${curSrv}</span>`:''}</div>
+              <div class="font-mono-tabular text-7xl font-bold my-6">${curQ?curQ.queue_number:'--'}</div>
+              <div class="grid grid-cols-2 gap-2">
+                <button onclick="callNext()" class="col-span-2 py-3 rounded-xl bg-emerald-700 text-white text-sm font-semibold">Panggil Berikutnya</button>
+                <button onclick="recallCurrent()" class="py-2 rounded-xl border text-sm font-medium">Panggil Ulang</button>
+                <button onclick="finishCurrent('skipped')" class="py-2 rounded-xl border border-amber-300 bg-amber-50 text-sm font-medium">Lewati</button>
+                <button onclick="finishCurrent('completed')" class="col-span-2 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">Selesai</button>
+              </div>
+            </div>
+            <div class="lg:col-span-7 bg-white border rounded-2xl p-6">
+              <h3 class="font-display font-bold mb-3">Antrean Waiting Hari Ini (${waiting.length})</h3>
+              <table class="w-full text-sm"><thead><tr class="border-b text-xs text-slate-500"><th class="py-2 text-left">No</th><th class="text-left">Layanan</th><th class="text-right">Waktu</th></tr></thead>
+              <tbody>${waiting.map(w => `<tr class="border-b"><td class="py-2 font-mono-tabular font-bold">${w.queue_number}</td><td>${srvs.find(x=>x.id===w.service_id)?.service_name}</td><td class="text-right font-mono-tabular">${w.created_at.split('T')[1]}</td></tr>`).join('') || '<tr><td colspan="3" class="py-6 text-center text-slate-400">Kosong</td></tr>'}</tbody></table>
+            </div>
+          </div></div>`;
+      } else {
+        const start = window._repStart || addDays(todayISO(), -13);
+        const end = window._repEnd || (s.active_date > todayISO() ? s.active_date : todayISO());
+        const filtered = qs.filter(q => q.queue_date >= start && q.queue_date <= end);
+        const rows = srvs.map(sv => ({ name: sv.service_name, count: filtered.filter(q => q.service_id === sv.id).length }));
+        root.innerHTML = `<div class="max-w-6xl mx-auto px-4 py-8 space-y-6">
+          <div class="bg-white border rounded-2xl p-6 flex flex-wrap justify-between items-center gap-4">
+            <div><h2 class="font-display text-xl font-bold">${user.full_name}</h2><p class="text-xs text-slate-500">Tanggal Aktif: ${s.active_date}</p></div>
+            <div class="flex flex-wrap gap-2">
+              ${user.role==='admin'?`<button onclick="adminTab='branding';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='branding'?'bg-slate-900 text-white':'bg-slate-100'}">Edit Tampilan</button><button onclick="adminTab='counters';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='counters'?'bg-slate-900 text-white':'bg-slate-100'}">Atur Loket</button>`:''}
+              <button onclick="adminTab='report';render()" class="px-3 py-2 rounded-lg text-xs font-semibold ${adminTab==='report'?'bg-slate-900 text-white':'bg-slate-100'}">Rekapitulasi</button>
+            </div>
+          </div>
+          ${user.role==='admin' && adminTab==='branding' ? `
+            <div class="grid md:grid-cols-2 gap-6">
+              <form onsubmit="saveBranding(event)" class="bg-white border rounded-2xl p-6 space-y-4">
+                <h3 class="font-display font-bold">Edit Tampilan & Logo</h3>
+                <div class="flex items-center gap-4"><img id="adm-logo-prev" src="${s.logo_url}" class="w-16 h-16 rounded-lg border object-contain" />
+                  <div class="space-y-2"><input type="file" accept="image/*" onchange="handleLogoFile(this)" class="text-xs block" />
+                  <button type="button" onclick="resetDefaultLogo()" class="px-2.5 py-1 rounded border text-xs">Logo Default</button></div>
+                </div>
+                <input id="adm-logo-url" value="${s.logo_url.startsWith('data:')?'':s.logo_url}" class="w-full px-3 py-2 border rounded-lg text-xs" placeholder="Atau tempel URL logo (https://...)" />
+                <input id="adm-header" value="${s.header_text}" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Header Text" />
+                <input id="adm-sub" value="${s.subheader_text}" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Sub-header Text" />
+                <button class="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm font-semibold">Simpan Tampilan</button>
+              </form>
+              <div class="bg-white border rounded-2xl p-6 space-y-4">
+                <h3 class="font-display font-bold">Pengujian Auto-Reset Harian (01)</h3>
+                <button onclick="simNextDay()" class="px-4 py-2 rounded-lg bg-amber-600 text-white text-xs font-semibold">Simulasikan Ganti Tanggal (+1 Hari)</button>
+              </div>
+            </div>
+          ` : user.role==='admin' && adminTab==='counters' ? `
+            <div class="grid md:grid-cols-12 gap-6">
+              <form onsubmit="addNewCounter(event)" class="md:col-span-4 bg-white border rounded-2xl p-6 space-y-4">
+                <h3 class="font-display font-bold">Tambah Loket Baru</h3>
+                <input id="new-loket-name" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="Nama Loket (cth: Loket 6)" />
+                <button class="w-full py-2.5 rounded-lg bg-emerald-700 text-white text-sm font-semibold">+ Tambah Loket</button>
+              </form>
+              <div class="md:col-span-8 bg-white border rounded-2xl p-6 divide-y">
+                ${cs.map(c => `<div class="py-3 flex items-center justify-between gap-4">
+                  <div><div class="font-bold text-sm">${c.counter_name}</div><div class="text-xs ${c.is_active?'text-emerald-700':'text-slate-500'}">${c.is_active?'Status: Aktif':'Status: Nonaktif'}</div></div>
+                  <button onclick="toggleCounterStatus(${c.id})" class="px-3 py-1.5 rounded-lg text-xs font-semibold border ${c.is_active?'bg-amber-50 border-amber-300 text-amber-900':'bg-emerald-700 text-white'}">${c.is_active?'Nonaktifkan':'Aktifkan'}</button>
+                </div>`).join('')}
+              </div>
+            </div>
+          ` : `
+            <div class="bg-white border rounded-2xl p-6 space-y-6">
+              <div class="flex flex-wrap gap-4 items-end">
+                <div><label class="block text-xs font-semibold mb-1">Tanggal Mulai</label><input type="date" value="${start}" onchange="window._repStart=this.value;render()" class="px-3 py-2 border rounded-lg text-sm" /></div>
+                <div><label class="block text-xs font-semibold mb-1">Tanggal Akhir</label><input type="date" value="${end}" onchange="window._repEnd=this.value;render()" class="px-3 py-2 border rounded-lg text-sm" /></div>
+              </div>
+              <div class="grid md:grid-cols-2 gap-6 items-center">
+                <table class="w-full text-sm"><thead><tr class="border-b text-xs text-slate-500"><th class="py-2 text-left">Layanan</th><th class="text-right">Jumlah</th></tr></thead>
+                <tbody>${rows.map(r => `<tr class="border-b"><td class="py-2.5 font-medium">${r.name}</td><td class="text-right font-mono-tabular font-bold">${r.count}</td></tr>`).join('')}</tbody></table>
+                <div class="h-64 relative"><canvas id="rep-chart"></canvas></div>
+              </div>
+            </div>
+          `}</div>`;
+        if (adminTab === 'report' || user.role === 'pimpinan') {
+          const cv = document.getElementById('rep-chart');
+          if (cv) {
+            if (doughnutChart) doughnutChart.destroy();
+            doughnutChart = new Chart(cv.getContext('2d'), {
+              type: 'doughnut',
+              data: { labels: rows.map(r => r.name), datasets: [{ data: rows.map(r => r.count), backgroundColor: ['#059669','#0f172a','#d97706','#2563eb','#64748b'] }] },
+              options: { responsive: true, maintainAspectRatio: false }
+            });
+          }
+        }
+      }
+      if (window.lucide) lucide.createIcons();
+    }
+
+    window.addEventListener('storage', () => render());
+    initDB();
+    render();
+  </script>
+</body>
+</html>
