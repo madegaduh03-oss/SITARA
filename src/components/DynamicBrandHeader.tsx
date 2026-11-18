@@ -53,7 +53,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
 
 interface DynamicBrandHeaderProps {
   settings: Settings;
-  variant?: 'light' | 'dark';
+  variant?: 'light' | 'dark' | 'teal';
   rightSlot?: React.ReactNode;
 }
 
@@ -62,12 +62,13 @@ export const DynamicBrandHeader: React.FC<DynamicBrandHeaderProps> = ({
   variant = 'light',
   rightSlot,
 }) => {
-  const isDark = variant === 'dark';
+  const isDark = variant === 'dark' || variant === 'teal';
+  const isTeal = variant === 'teal';
 
   return (
     <div
       className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b ${
-        isDark ? 'border-slate-800' : 'border-slate-200'
+        isTeal ? 'border-teal-700/70' : isDark ? 'border-slate-800' : 'border-slate-200'
       }`}
     >
       <div className="flex items-center gap-4 min-w-0">
@@ -86,7 +87,7 @@ export const DynamicBrandHeader: React.FC<DynamicBrandHeaderProps> = ({
           </h1>
           <p
             className={`text-sm sm:text-base mt-0.5 leading-snug ${
-              isDark ? 'text-slate-300' : 'text-slate-600'
+              isTeal ? 'text-teal-100' : isDark ? 'text-slate-300' : 'text-slate-600'
             }`}
           >
             {settings.subheader_text || 'Sistem Informasi Antrean Kecamatan Tulangan'}
